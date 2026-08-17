@@ -1,0 +1,92 @@
+[
+  {
+    "product_id": "P001",
+    "product_name": "Mechanical Keyboard",
+    "category": "Hardware",
+    "list_price": "89.00"
+  },
+  {
+    "product_id": "P002",
+    "product_name": "Wireless Mouse",
+    "category": "Accessories",
+    "list_price": "25.00"
+  },
+  {
+    "product_id": "P003",
+    "product_name": "USB-C Hub",
+    "category": "Peripherals",
+    "list_price": "45.00"
+  },
+  {
+    "product_id": "P004",
+    "product_name": "27in Monitor",
+    "category": "Hardware",
+    "list_price": "249.00"
+  },
+  {
+    "product_id": "P005",
+    "product_name": "Laptop Stand",
+    "category": "Accessories",
+    "list_price": "34.95"
+  },
+  {
+    "product_id": "P006",
+    "product_name": "Webcam 1080p",
+    "category": "Peripherals",
+    "list_price": "59.99"
+  },
+  {
+    "product_id": "P007",
+    "product_name": "Noise-Cancel Headset",
+    "category": "Hardware",
+    "list_price": "129.99"
+  },
+  {
+    "product_id": "P008",
+    "product_name": "Docking Station",
+    "category": "Accessories",
+    "list_price": "199.00"
+  },
+  {
+    "product_id": "P009",
+    "product_name": "Ergonomic Chair Mat",
+    "category": "Peripherals",
+    "list_price": "19.99"
+  },
+  {
+    "product_id": "P010",
+    "product_name": "Cable Organiser",
+    "category": "Hardware",
+    "list_price": "9.99"
+  },
+  {
+    "product_id": "P011",
+    "product_name": "Portable SSD 1TB",
+    "category": "Accessories",
+    "list_price": "119.00"
+  },
+  {
+    "product_id": "P012",
+    "product_name": "Desk Lamp LED",
+    "category": "Peripherals",
+    "list_price": "39.50"
+  },
+  {
+    "product_id": "P013",
+    "product_name": "Monitor Arm",
+    "category": "Hardware",
+    "list_price": "79.00"
+  },
+  {
+    "product_id": "P014",
+    "product_name": "Silicone Wrist Rest",
+    "category": "Accessories",
+    "list_price": "12.50"
+  },
+  {
+    "product_id": "P015",
+    "product_name": "Bluetooth Speaker",
+    "category": "Peripherals",
+    "list_price": "64.99"
+  }
+]

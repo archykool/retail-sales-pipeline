@@ -1,0 +1,142 @@
+[
+  {
+    "customer_id": "C001",
+    "customer_name": "Alderman Supply",
+    "region": "North",
+    "segment": "Retail",
+    "signup_date": "2023-01-15"
+  },
+  {
+    "customer_id": "C002",
+    "customer_name": "Brightwater Retail",
+    "region": "South",
+    "segment": "Wholesale",
+    "signup_date": "2024-02-15"
+  },
+  {
+    "customer_id": "C003",
+    "customer_name": "Cinder & Co",
+    "region": "East",
+    "segment": "Enterprise",
+    "signup_date": "2025-03-15"
+  },
+  {
+    "customer_id": "C004",
+    "customer_name": "Draymoor Group",
+    "region": "West",
+    "segment": "Retail",
+    "signup_date": "2023-04-15"
+  },
+  {
+    "customer_id": "C005",
+    "customer_name": "Eastvale Trading",
+    "region": "North",
+    "segment": "Wholesale",
+    "signup_date": "2024-05-15"
+  },
+  {
+    "customer_id": "C006",
+    "customer_name": "Foxglove Stores",
+    "region": "South",
+    "segment": "Enterprise",
+    "signup_date": "2025-06-15"
+  },
+  {
+    "customer_id": "C007",
+    "customer_name": "Granite Wholesale",
+    "region": "East",
+    "segment": "Retail",
+    "signup_date": "2023-07-15"
+  },
+  {
+    "customer_id": "C008",
+    "customer_name": "Harrowgate Ltd",
+    "region": "West",
+    "segment": "Wholesale",
+    "signup_date": "2024-08-15"
+  },
+  {
+    "customer_id": "C009",
+    "customer_name": "Ivyhurst Partners",
+    "region": "North",
+    "segment": "Enterprise",
+    "signup_date": "2025-09-15"
+  },
+  {
+    "customer_id": "C010",
+    "customer_name": "Jarrow Mercantile",
+    "region": "South",
+    "segment": "Retail",
+    "signup_date": "2023-10-15"
+  },
+  {
+    "customer_id": "C011",
+    "customer_name": "Kestrel Outlets",
+    "region": "East",
+    "segment": "Wholesale",
+    "signup_date": "2024-11-15"
+  },
+  {
+    "customer_id": "C012",
+    "customer_name": "Larkspur Trading",
+    "region": "West",
+    "segment": "Enterprise",
+    "signup_date": "2025-12-15"
+  },
+  {
+    "customer_id": "C013",
+    "customer_name": "Millbrook Depot",
+    "region": "North",
+    "segment": "Retail",
+    "signup_date": "2023-01-15"
+  },
+  {
+    "customer_id": "C014",
+    "customer_name": "Northcliff Retail",
+    "region": "South",
+    "segment": "Wholesale",
+    "signup_date": "2024-02-15"
+  },
+  {
+    "customer_id": "C015",
+    "customer_name": "Oakhaven Supply",
+    "region": "East",
+    "segment": "Enterprise",
+    "signup_date": "2025-03-15"
+  },
+  {
+    "customer_id": "C016",
+    "customer_name": "Pinecrest Group",
+    "region": "West",
+    "segment": "Retail",
+    "signup_date": "2023-04-15"
+  },
+  {
+    "customer_id": "C017",
+    "customer_name": "Quarrywood Ltd",
+    "region": "North",
+    "segment": "Wholesale",
+    "signup_date": "2024-05-15"
+  },
+  {
+    "customer_id": "C018",
+    "customer_name": "Redmarsh Stores",
+    "region": "South",
+    "segment": "Enterprise",
+    "signup_date": "2025-06-15"
+  },
+  {
+    "customer_id": "C019",
+    "customer_name": "Stonebridge Co",
+    "region": "East",
+    "segment": "Retail",
+    "signup_date": "2023-07-15"
+  },
+  {
+    "customer_id": "C020",
+    "customer_name": "Thornfield Supply",
+    "region": "West",
+    "segment": "Wholesale",
+    "signup_date": "2024-08-15"
+  }
+]
