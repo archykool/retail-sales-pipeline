@@ -875,7 +875,7 @@ output, because volume reads as thoroughness.
 
 ---
 
-## Open questions (Q2 and Q3 resolved before Step 5; Q4 and Q5 before Step 8; Q6 is open with no deadline)
+## Open questions (Q2 and Q3 resolved before Step 5; Q4 and Q5 before Step 8; Q6 and Q7 are open with no deadline)
 
 | # | Question | Leaning |
 |---|---|---|
@@ -885,6 +885,8 @@ output, because volume reads as thoroughness.
 | Q4 | Should `etl_run_log` be in scope? | Yes — it is ~10 lines and it makes the reconciliation query in SPEC §8.2 possible, which is the direct answer to the assignment's "how do you know it's correct." |
 | Q5 | Does `stg_sales` hold raw strings or typed valid rows? | Typed valid rows, per the assignment's "staging table for valid sales records." Note in the video that a stricter definition of staging would keep raw text and validate downstream — knowing the alternative is worth mentioning. |
 | Q6 | The rejected CSV accumulates (`_2` suffix); the preview CSV overwrites; §7.3 makes the database replace on rerun. Is that asymmetry right? | **Unresolved.** Leaning: make both writers overwrite, matching the database — history is git's job and the backup's, not the pipeline's. Against: the rejected file is the only record of what went wrong, and overwriting it loses the previous run's diagnosis. |
+
+| Q7 | `docs/requirements_coverage.md` cites 24 distinct test names by hand (40 citations in total) and nothing checks them. Extend the README count guard to cover them? | **Unresolved.** About fifteen lines in `test_architecture.py`, the same pattern as `test_readme_adr_count_matches_decision_log` — parse the cited names, assert each resolves to a real test function or test file. Verified clean at this commit: all 24 resolve (18 functions, 6 file names). Deliberately **not** added before recording: nothing has drifted yet, and a new test introduced hours before a take is a red suite to deal with at the worst possible moment. If it drifts before the recording it becomes a known issue to name rather than a surprise; if this project is extended afterwards, it is the first thing to add. |
 
 Q6 replaces two references to a "Step 14" that no longer exists. Steps 14–15 were folded
 into §11 and §12, and this deferral outlived the step it deferred to — so it read as a plan
