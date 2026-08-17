@@ -144,10 +144,12 @@ Plain `@dataclass` objects. Frozen where they represent immutable facts.
 | `RawSalesRecord` | `row_num, source_file` + all CSV columns **as `str`** | `CSVExtractor` |
 | `Customer` | `customer_id, customer_name, region, signup_date, segment` | **`ReferenceDataTransformer`** |
 | `Product` | `product_id, product_name, category, list_price` | **`ReferenceDataTransformer`** |
-| `ValidSalesRecord` | `order_id: int, order_date: date, customer_id: str, product_id: str, quantity: int, unit_price: Decimal, discount_rate: Decimal` | `SalesDataValidator` |
+| `ValidSalesRecord` | `row_num: int, source_file: str, order_id: int, order_date: date, customer_id: str, product_id: str, quantity: int, unit_price: Decimal, discount_rate: Decimal` | `SalesDataValidator` |
 | `FactSalesRecord` | `ValidSalesRecord` fields + `gross_sales, discount_amount, net_sales` (all `Decimal`) | `SalesDataTransformer` |
 | `RejectedRecord` | `row_num, source_file, raw_payload: dict, reason_code: str, reason_detail: str, rejected_at` | `SalesDataValidator` |
 | `PipelineResult` | `run_id, counts, duration, dry_run: bool, status` | `SalesPipeline` |
+
+Provenance (`row_num`, `source_file`) survives validation. `stg_sales` stores both, and when the §8.2 reconciliation fails to balance they are the only way to locate the offending row in the source file. See D-020.
 
 **Extractors never build domain objects.** `CSVExtractor` returns `RawSalesRecord` (strings). `JSONExtractor` returns `list[dict]` (raw parsed JSON). The uniform rule — *everything that comes off disk is untrusted* — is what makes the model layer a state machine rather than a bag of classes. See D-016.
 
@@ -273,10 +275,10 @@ Every rule gets a stable `reason_code` so rejections are groupable in SQL.
 | `DISCOUNT_EQ_ONE` | `discount_rate == 1.0` | 100% off yields `net_sales = 0`; suspicious, not free |
 | `QTY_EXCEEDS_THRESHOLD` | `quantity > 1000` | outlier guard, configurable via env |
 | `NON_NUMERIC_CURRENCY` | `"$19.99"` or `"1,299.00"` | most common real-world price defect |
-| `WHITESPACE_KEY` | ID with leading/trailing whitespace | **cleaned, not rejected** — logged only |
+| `KEY_NORMALIZED` | ID with leading/trailing whitespace or inconsistent casing | **cleaned, not rejected** — logged only |
 | `PRICE_PRECISION` | `unit_price` has >2 decimal places | rounding policy must be explicit |
 
-**Policy line for the video:** whitespace and letter-case on IDs are *cleaned*; everything else is *rejected*. Cleaning a cosmetic defect is safe; cleaning a semantic one — guessing at an unknown customer — is not. That boundary is the judgment call an examiner will probe.
+**Policy line for the video:** whitespace and letter-case on IDs are *cleaned* and logged as `KEY_NORMALIZED`; everything else is *rejected*. Cleaning a cosmetic defect is safe — stripping and upper-casing an ID cannot change *which* entity it refers to. Cleaning a semantic one — guessing at an unknown customer — is not. That boundary is the judgment call an examiner will probe.
 
 ### 6.3 Validator contract
 
@@ -425,22 +427,38 @@ Folders per §3; `.gitignore` (`.env`, `data/rejected/*`, `!data/rejected/.gitke
 ### Step 3 — Data models
 **PDF anchor:** Step 3 (marked optional in the PDF — we are doing it; see D-003)
 `src/models.py` per §4. No logic beyond `__post_init__` coercion helpers.
-**Exit:** every model constructible in the REPL.
+**Exit:** `pytest -q` green — all seven models frozen, no field defaulted.
 **Commit:** `feat: dataclass data contract`
+
+### Step 3+ — Bad-record catalogue and demo data
+**PDF anchor:** none (addition)
+**Runs BEFORE Step 4.** Step 4's exit criteria require these files to exist.
+
+Two artifacts, written in this order:
+
+1. `docs/bad_records_catalogue.md` — the oracle. One row per planted defect
+   with `row_num`, the defect, and the expected `reason_code`. Includes the
+   precedence rules that decide the primary code when a row breaks several
+   rules at once (D-021).
+2. `scripts/generate_demo_data.py` — implements the catalogue. ~200 sales
+   rows, 20 customers, 15 products.
+
+**Catalogue first, generator second, and both before the validator.** If the
+generator is written first the catalogue becomes a transcript of its output
+and can no longer disagree with it. Written first, the catalogue is a
+specification the generator implements — and the disagreements are the
+signal. See D-012.
+
+**Exit:** three files in `data/raw/`; catalogue covers every row-scoped code
+in §6 (`SCHEMA_MISMATCH` is file-scoped and is exercised by an extractor
+test fixture in Step 4, not planted in the data).
+**Commit:** `feat: bad-record catalogue and synthetic demo data`
 
 ### Step 4 — Extractors
 **PDF anchor:** Step 4
 `src/extractors.py`. `Extractor(ABC)` with `@abstractmethod extract()`. `CSVExtractor` → `list[RawSalesRecord]` (validates header, `row_num` starts at 2 to match Excel, `encoding="utf-8-sig"` for BOM). `JSONExtractor` → `list[dict]`, **raw, no domain objects** (D-016).
-**Exit:** correct counts for all three files; a corrupted header raises `SchemaMismatchError`.
+**Exit:** correct counts for all three files; a corrupted header raises `SchemaMismatchError` — exercised by a `tmp_path` header fixture in the extractor tests, not by a committed data file (see §3+).
 **Commit:** `feat: abstract extractor with CSV and JSON implementations`
-
-### Step 4+ — Demo data and bad-record catalogue
-**PDF anchor:** none (addition)
-`scripts/generate_demo_data.py` producing ~200 sales rows (≈15% intentionally bad), 20 customers, 15 products. Then `docs/bad_records_catalogue.md`: one row per planted defect with `row_num`, the defect, and the expected `reason_code`.
-
-**Written before the validator on purpose.** It is the test oracle. If the validator is written first, "it caught 30 bad rows" only proves the validator agrees with itself. See D-012.
-**Exit:** three files in `data/raw/`; catalogue lists ≥15 defects covering every code in §6.
-**Commit:** `feat: synthetic demo data with documented defects`
 
 ### Step 5 — Validator
 **PDF anchor:** Step 5
@@ -518,7 +536,7 @@ argparse (`--dry-run`, `--file`, `--log-level`); exit code 0 on success, 1 on fa
 | R13 | Config from env vars | 2 | `PipelineConfig` | Step 2 |
 | R14 | Dataclass models | 3 | `src/models.py` | Step 3 |
 | R15 | Abstraction (ABC) | 4 | `Extractor` | Step 4 |
-| R16 | Extra edge cases | 5 | §6.2 | Step 4+, Step 5 |
+| R16 | Extra edge cases | 5 | §6.2 | Step 3+, Step 5 |
 | R17 | Pre-load verification | checkpoint | dry-run, §8.1 | Step 9 |
 | R18 | "How do you know it's correct" | checkpoint | §8.2 | Step 13 |
 | R19 | Revenue per day | 13 | `analytics.sql` Q1 | Step 13 |

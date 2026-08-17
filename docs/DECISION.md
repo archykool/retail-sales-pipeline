@@ -302,9 +302,72 @@ The ambiguity is the point worth voicing. Noticing that "between zero and one" i
 
 **Say on camera.** "The doc says between zero and one but doesn't say whether one is included — I excluded it, because a hundred-percent-off line posts zero revenue and should be looked at. If the grader wants it inclusive it's one constant."
 
+## D-018 — from_env() reads only from environment variables, not files
+**Context**: Initial acceptance/verification failed because the required environment variables were not set in the shell.
+
+**Decision**: from_env() does not touch load_dotenv(); loading .env is deferred strictly to application entry points.
+
+**Consequences**: The .env file is relegated to a local development convenience. In production, variables are injected directly by the container runtime, keeping the code execution path identical—which is the exact prerequisite for the dev/prod switching in §8.1. The trade-off is that unit tests targeting from_env() must explicitly monkeypatch the environment, adding a couple of extra lines compared to reading directly from a file.
+
+**Say on camera.** "Config reads from the environment, not from files—the .env file is just a local convenience, requiring zero changes in production."
+
 ---
 
-## Open questions (resolve before Step 4+)
+## D-021 — One rejected row, one record: primary `reason_code` by precedence tier
+
+**Status:** Accepted
+
+**Context.** D-004 collects every failure reason for a row rather than stopping at
+the first, and `RejectedRecord` carries exactly one `reason_code` plus a
+`reason_detail` listing all of them — one row in, one rejection record out, which
+is what keeps §8.2's row conservation (`extracted == valid + rejected`) arithmetic
+rather than approximate.
+
+That forces a question the spec did not answer: when a row breaks three rules at
+once, which code becomes *the* code? Four rows in `bad_records_catalogue.md` (72,
+108, 113, 117) break more than one rule, and Step 5's exit criterion is that the
+validator agrees with the catalogue on *which code fired on which row*. Without a
+written rule the two cannot be compared at all.
+
+**Options.**
+1. **No primary code** — carry a list of codes, drop the single-code column.
+   Honest, but `GROUP BY reason_code` (D-013) stops working, and the rejected
+   table stops being a data-quality report.
+2. **First rule that fires, in source order** — trivial to implement. The primary
+   code then depends on the order methods happen to be written in, so reordering
+   the validator silently changes historical reporting.
+3. **Column order only** — the leftmost bad column wins. Stable, but ranks a
+   malformed date above an unparseable price for no reason other than CSV layout.
+4. **Precedence tiers by knowability**, ties broken on column order.
+
+**Decision.** Option 4. Five tiers: missing field → parse failure → range/value →
+foreign key → file-scoped duplicate. Plus suppression rules, so a more specific
+code replaces a general one describing the same failure rather than both being
+recorded (`NON_NUMERIC_CURRENCY` over `BAD_DECIMAL_PRICE`; `DISCOUNT_EQ_ONE` over
+`DISCOUNT_OUT_OF_RANGE`). Full table in `bad_records_catalogue.md` §3.
+
+**Consequences.** The tiers are not a convention chosen for tidiness — they follow
+what is actually knowable at each stage. You cannot range-check a number that
+failed to parse, and you cannot foreign-key-check a field that was empty. So the
+primary code is always the *earliest* thing that went wrong, which is also the
+thing a person fixing the file should address first: correcting the parse error on
+row 108 may well make its quantity check moot.
+
+The cost is that precedence is a rule I have to keep in sync across two artifacts —
+the catalogue asserts it and the validator implements it. That duplication is
+deliberate (it is the same defence-in-depth argument as D-010), but a change to
+the tiers means editing both.
+
+Suppression carries a subtler cost: `reason_detail` no longer lists literally every
+predicate that would have failed, only the surviving diagnoses. A row priced
+`"$45.00"` reports one defect, not two. That is the correct count of *problems*
+even though it is not the count of *failed checks*.
+
+**Say on camera.**
+
+---
+
+## Open questions (resolve before Step 3+)
 
 | # | Question | Leaning |
 |---|---|---|
