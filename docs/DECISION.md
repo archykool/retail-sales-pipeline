@@ -805,6 +805,68 @@ eroded to make room for a status column.
 
 ---
 
+## D-026 — Document what each check *cannot* distinguish, not only what it verifies
+
+**Status:** Accepted
+
+**Context.** `analytics.sql`'s CHECK 2 recomputes all three money measures in SQL from the
+staged inputs and compares them row by row to what the Python transformer stored. It agrees
+on all 172 rows. I wrote a comment claiming it therefore "silently verifies the rounding
+mode" as well — PostgreSQL's `round()` on `numeric` rounds half away from zero, the same as
+`ROUND_HALF_UP`, so a mismatch would surface any disagreement.
+
+**That claim was false.** The two modes differ only on an exact half-cent whose preceding
+digit is even. This dataset's only half-cent ties are rows 34, 76 and 118, and all three are
+`17.475` — the `7` is odd, so `ROUND_HALF_UP` and `ROUND_HALF_EVEN` both round up to `17.48`
+and produce identical output. **A transformer using banker's rounding would pass CHECK 2
+unchanged, on every row.** The check is real and valuable; it simply cannot see the thing I
+said it could.
+
+**Then the verification was wrong too.** The query I wrote to test whether any row
+distinguished the modes reported **3**, appearing to refute the correction and restore the
+original claim. It was buggy: it used `(x * 100)::bigint % 2` to read the digit before the
+tie, and a `bigint` cast in PostgreSQL *rounds* rather than truncates. `1747.5` became
+`1748`, flipping the parity from odd to even and inverting the entire test. Rewritten with
+`trunc()`, the answer is **0** — no row in this dataset can tell the modes apart.
+
+So: a false claim, and then a broken check of the claim that happened to agree with it.
+Two wrong things stacked, pointing the same way.
+
+**Options.**
+1. **Delete the sentence.** Cheapest, and loses the information — the next reader assumes
+   the check covers more than it does, which is the original problem.
+2. **Strengthen the dataset** so a distinguishing value exists and CHECK 2 really does verify
+   the mode. Defensible, but it means editing the demo data to make a SQL comment true, and
+   it would change every count in the bad-record catalogue.
+3. **State the limitation next to the check**, and pin the rounding mode with the unit test
+   that genuinely distinguishes them.
+
+**Decision.** Option 3. CHECK 2's comment now says explicitly that a `ROUND_HALF_EVEN`
+transformer would pass it unchanged, and points at
+`test_rounding_is_half_up_not_half_even`, which uses `12.50 × 0.01 = 0.125` — where the
+even `2` makes the modes diverge to `0.13` and `0.12`.
+
+**Consequences.** The generalisation is the reason this is an ADR rather than a fixed typo:
+**a check is only as good as your account of what it can distinguish, and "all checks pass"
+is a much weaker statement than "I know what each check cannot prove."** Four green
+reconciliation checks and 280 green tests say nothing about the failures none of them are
+shaped to catch. The value of writing the limitation down is that it converts an unknown
+gap into a known one, and known gaps can be closed deliberately.
+
+The second layer carries its own lesson, and it is the more uncomfortable one. The
+verification query agreed with the claim I already believed, so a wrong answer looked like
+confirmation. The only reason it was caught is that the number was surprising enough —
+"3 rows would differ" contradicted arithmetic I had done by hand — to be worth checking
+twice. A verification that returns the expected answer gets checked far less carefully than
+one that does not, which is exactly backwards.
+
+Both errors were found by reading output, not by re-reading the claim. Neither would have
+been caught by review, because both read as correct.
+
+**Say on camera.**
+
+---
+
 ## Open questions (Q2 and Q3 resolve before Step 5; Q4 and Q5 before Step 8)
 
 | # | Question | Leaning |
