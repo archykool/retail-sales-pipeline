@@ -409,6 +409,22 @@ cheaper than a load into the wrong database.
 Related: `from_env()` reads `os.environ` only and never calls `load_dotenv()` (D-018).
 The two decisions are the same instinct — configuration is explicit or it is a bug.
 
+**It proved itself the same day it was written.** During Step 8b a throwaway script in a
+scratchpad directory called `load_dotenv()` with no argument. python-dotenv resolves that
+relative to the calling file, so it searched the scratchpad, found no `.env`, and loaded
+nothing. The run died immediately on `Required env var missing: DB_HOST`.
+
+With defaults it would have connected to `localhost:5432/postgres` instead, and because
+`create_tables()` is idempotent DDL it would have built the entire star schema in the wrong
+database and loaded 172 fact rows into it. The script would have printed a clean
+reconciliation. Every number would have been correct. They would have been correct about a
+database nobody meant to write to, and the only way to notice would be wondering why
+`sales_dev` was still empty.
+
+That is a better argument for this ADR than the hypothetical it was written with, and it is
+the version to use on camera: not "defaults are risky" but "here is the afternoon it caught
+me, in my own scratch file, hours after I wrote it down."
+
 **Say on camera.**
 
 ---
@@ -446,6 +462,33 @@ The concrete payoff is at §8.2. When the reconciliation does not balance, the q
 never "did it balance" but "which row", and `row_num` plus `source_file` answers it
 directly: open that file, go to that line. Without them the failure is real but
 unlocalisable, which is the same weakness D-022 identifies in the NaN case.
+
+**The part worth leading with: a field added for diagnosability turned out to be a
+precondition for correctness.**
+
+`stg_sales.source_file` was added so that a failed reconciliation could be localised —
+open that file, go to that line. Nothing more. Then Step 8b hit a problem that looked
+unrelated: `fact_sales` has no `source_file` column, so a rerun cannot scope its fact
+deletions by file. §7.3 originally deleted facts by *this load's* order IDs, which silently
+leaves a stale fact behind whenever a row is edited into a rejection or removed from the
+file. The only way to ask "what did the previous load of this file actually write" is to
+reach through `stg_sales.source_file`.
+
+So the field is not a debugging convenience. It is what makes fact-table idempotency
+expressible at all, and §7.3 is now written in terms of it. That sequence — added for one
+reason, discovered months-of-work later to be load-bearing for another — is the most
+useful thing about this decision, and better than the argument it was originally made with.
+A capability retained without a current use is not waste; provenance is cheap to keep and
+expensive to reconstruct.
+
+**A related shaping note.** `PipelineResult` and `etl_run_log` describe the same run and do
+not match: the model carries `duration_seconds` and `dry_run`, which the table has no
+columns for, and the table needs `source_file`, `started_at` and `finished_at`, which the
+model does not hold. Neither side is wrong. The model is shaped by *purpose* — a caller
+receiving `run()`'s result needs to know whether anything was actually written — while the
+table is shaped by *storage*. They are not expected to align, and `write_run_log` takes a
+`PipelineResult` plus the missing fields as explicit arguments so the conversion happens
+visibly at the boundary rather than by deforming either side to fit the other.
 
 `source_file` is deliberately `path.name` and not the full path. A full path would differ
 between machines, so the same file would look like a different source on another checkout
@@ -686,6 +729,62 @@ corrupts the number everyone queries to repair an identity nobody queries.
 - If the dataset is ever regenerated with different prices or rates, the constant
   changes. It is a property of this data, not of the code, and the reconciliation
   comment says so.
+
+**Say on camera.**
+
+---
+
+## D-025 — `etl_run_log` records successes only; observability does not get to break atomicity
+
+**Status:** Accepted
+
+**Context.** §5 declared `etl_run_log.status` as `RUNNING | SUCCESS | FAILED`. Under §7.4 —
+one transaction for the entire load — two of those three states are unreachable:
+
+- **RUNNING** would be written at the start of the transaction and updated at the end, but
+  nothing commits until the end. The row and the row superseding it become visible at the
+  same instant, so no observer ever sees `RUNNING`.
+- **FAILED** cannot be written at all. The failure rolls back the transaction, and the log
+  row is inside it. A run that fails erases its own record of having failed.
+
+So the audit table records only the runs that worked, which is the opposite of what an audit
+table is usually for.
+
+**Options.**
+1. **A second connection with autocommit**, writing RUNNING at the start and FAILED on
+   exception, outside the main transaction. The standard pattern.
+2. **Accept SUCCESS-only** and rely on the log file and exit code for failures.
+3. Abandon the single-transaction boundary so the log row can commit independently.
+
+**Decision.** Option 2.
+
+Option 1 is the obvious fix and it is the one to refuse. A second connection is a write not
+governed by the run's atomicity boundary, which is exactly what D-008 exists to forbid. The
+whole claim of that decision is that a run is all-or-nothing — that a failure leaves the
+database as it was, so no query can ever observe a half-loaded warehouse. Adding a channel
+that writes outside the transaction buys observability by making that claim conditional,
+and a guarantee with an exception is a much weaker thing to say than a guarantee.
+
+Option 3 inverts the trade for the same reason and costs more.
+
+**Consequences.** Failure is observable in two places that do not require a transaction:
+the log file, where every stage already logs counts and elapsed time, and the process exit
+code — 1 on failure, which is what makes the pipeline cron-able (Step 10+). Neither is
+inside the database, and for a single daily batch neither needs to be.
+
+There is a sharper consequence, counter-intuitive and correct: **because `create_tables()`
+also runs inside the transaction, a failed *first* run leaves no tables at all.** Not empty
+tables — no tables. PostgreSQL is transactional over DDL, so the `CREATE TABLE` statements
+roll back with everything else. Someone debugging a first-run failure will connect, find an
+empty database, and reasonably conclude the schema step never executed. It did; it was
+undone. Worth saying plainly rather than discovering on camera.
+`test_a_failed_load_leaves_nothing_behind` asserts exactly this.
+
+The honest limit of this decision: it is right at one file a day on one machine. At a
+volume where runs are monitored by something other than a person reading a log file, the
+run log has to become observable independently, and that means either a separate connection
+or an outbox — at which point D-008's boundary needs revisiting deliberately rather than
+eroded to make room for a status column.
 
 **Say on camera.**
 

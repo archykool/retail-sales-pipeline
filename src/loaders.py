@@ -654,12 +654,17 @@ class PostgresLoader:
 
         **A consequence worth stating plainly: a FAILED run leaves no log row at all.**
         The failure rolls back the transaction and the log row is inside it, so this table
-        records successes only. Making failures observable needs a second connection
-        outside this transaction — a decision for the owner, raised in the Step 8b report.
+        records successes only (D-025). A second connection outside the transaction would
+        fix that and is deliberately refused: it would be a write not governed by the run's
+        atomicity boundary, which is what D-008 exists to forbid. Failures are observable in
+        the log file and the exit code instead.
 
-        `source_file`, `started_at` and `finished_at` are parameters because
-        `PipelineResult` carries none of them; it has `duration_seconds` and `dry_run`,
-        for which this table has no columns. A small but real model/table mismatch.
+        `source_file`, `started_at` and `finished_at` are explicit parameters because
+        `PipelineResult` does not carry them, and it carries `duration_seconds` and
+        `dry_run`, for which this table has no columns. Neither side is wrong: the model is
+        shaped by what a caller of `run()` needs to know, the table by what is worth
+        storing. The conversion belongs here, visibly, rather than either side deforming to
+        match the other (D-020).
         """
         self.connection.execute(
             "INSERT INTO etl_run_log (run_id, source_file, started_at, finished_at,"

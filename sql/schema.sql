@@ -32,7 +32,12 @@ CREATE TABLE IF NOT EXISTS etl_run_log (
     rows_valid      INT,
     rows_rejected   INT,
     rows_loaded     INT,
-    status          TEXT NOT NULL      -- RUNNING | SUCCESS | FAILED
+    -- SUCCESS only, and that is a consequence of the design rather than a gap.
+    -- The whole load is one transaction (§7.4), so a RUNNING row would commit at the
+    -- same instant as the row superseding it, and a FAILED run rolls back its own log
+    -- entry along with everything else. Failed runs are visible in the log file and the
+    -- process exit code, not here. See D-025.
+    status          TEXT NOT NULL
 );
 
 

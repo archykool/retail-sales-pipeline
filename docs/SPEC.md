@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS etl_run_log (
     rows_valid      INT,
     rows_rejected   INT,
     rows_loaded     INT,
-    status          TEXT NOT NULL      -- RUNNING | SUCCESS | FAILED
+    status          TEXT NOT NULL      -- SUCCESS only; see below and D-025
 );
 
 CREATE TABLE IF NOT EXISTS stg_sales (
@@ -351,16 +351,38 @@ Then build in-memory maps `{customer_id: customer_key}` and `{product_id: produc
 
 ### 7.3 Idempotency
 
-Running the same file twice must not double revenue. Per run:
+Running the same file twice must not double revenue. Per run, **in this order**:
 
-1. `DELETE FROM stg_sales WHERE source_file = %s`
-2. `DELETE FROM fact_sales WHERE order_id IN (...)` for this file's order IDs
-3. `DELETE FROM etl_rejected_sales WHERE source_file = %s`
-4. Insert everything fresh
+1. `DELETE FROM fact_sales WHERE order_id IN (SELECT order_id FROM stg_sales WHERE source_file = %s)`
+2. `DELETE FROM fact_sales WHERE order_id = ANY(%s)` — this load's own order IDs
+3. `DELETE FROM stg_sales WHERE source_file = %s`
+4. `DELETE FROM etl_rejected_sales WHERE source_file = %s`
+5. Insert everything fresh
 
-Dimensions are upserted, never deleted.
+**Step 1 is not optional and its omission is a correctness bug, not an efficiency one.**
+`fact_sales` has no `source_file` column, so facts cannot be scoped by file directly. An
+earlier version of this section deleted only by *this load's* order IDs, which silently
+fails in two cases: a row that was valid last run and has since been edited into a
+rejection, and a row deleted from the file entirely. Neither order ID appears in the new
+set, so the old fact row survives — a fact no source row explains, inflating
+`SUM(net_sales)` with nothing to detect it. Row conservation still balances, because it
+counts *this* run.
+
+Step 1 works by reaching through `stg_sales`, which does keep `source_file`. Step 2 stays
+because the same order ID could arrive under a different filename, and `order_id` is
+`UNIQUE` on `fact_sales` — a collision aborts the transaction rather than replacing a row.
+Steps 1 and 3 must stay in that order: deleting staging first destroys the only record of
+what the previous load wrote.
+
+Dimensions are upserted, never deleted. A customer does not stop existing because one file
+stopped mentioning them.
 
 **Acceptance test: run `main.py` twice, confirm `SELECT SUM(net_sales) FROM fact_sales` is identical.** Demo this live — it is the most convincing 15 seconds available.
+
+A second test worth keeping, because the first one passes without step 1: insert an extra
+fact and staging row as though a previous load had contained an order this file no longer
+does, rerun, and confirm it is gone. Covered by
+`test_stale_fact_is_removed_when_a_row_leaves_the_file`.
 
 ### 7.4 Transaction boundary
 
