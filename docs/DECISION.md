@@ -283,6 +283,42 @@ The real risk being managed is scope creep: I have over-engineered a portfolio p
 
 Writing the rationale myself rather than pasting the agent's explanation is the actual test. Reading a justification produces a feeling of understanding; reproducing it produces the real thing, and the video will expose which one I have.
 
+### The spec has been corrected by implementation five times
+
+Not a list of mistakes — a list of things a spec-first process caught that neither the
+spec nor the code would have caught alone. Each was found because writing the code forced
+a question the document had answered vaguely, or not at all:
+
+1. **Step 3+ ordering.** §9 said "generator… then catalogue", which contradicts D-012's
+   entire argument. Written that way round, the catalogue becomes a transcript of the
+   generator's output and can no longer disagree with it. Reversed.
+2. **`stg_sales` vs `ValidSalesRecord`.** §5 declared `source_file` and `row_num` columns
+   that no model carried past validation, so those columns had no source. Fixed by
+   D-020 — provenance now survives validation.
+3. **The unowned preview file.** §8.1 and D-011 both require
+   `data/rejected/preview_fact_sales.csv`, and no step in §9 produced it. It would have
+   surfaced at Step 10 as "dry-run doesn't work", and the tempting fix — writing the CSV
+   inside `pipeline.py` — is a rejection trigger. Assigned to Step 7b instead.
+4. **The PDF step anchors.** Six were inferred and never verified; two were wrong. Docker
+   Compose is PDF Step 9, not Step 1, and the PDF has **no configuration step at all**.
+   Two commits had already landed under the wrong labels. §9 renumbered against the
+   document, §9.0 added as a two-way map.
+5. **The build-order column contradicting itself.** Inserting Step 7b left §9.0 claiming
+   two different steps were both built twelfth — a table that had started describing an
+   intention rather than the sequence.
+
+There is a sixth of a different kind, worth separating: the transformer produced three
+money columns that do not sum to each other (D-024). The spec was not wrong there — §7.1
+says exactly what to do — but nothing had noticed that following it makes
+`gross ≠ discount + net` on three rows, which would have failed a `CHECK` constraint at
+Step 8 and been diagnosed as a bug in the arithmetic rather than a property of rounding.
+
+**This is the argument that the spec is load-bearing rather than decorative.** A document
+nobody implements against is never wrong, because nothing tests it. Five corrections in
+eleven steps is the evidence that this one was being read closely enough to break — and
+each correction is written down with its reasoning, which is why the ADR log has a D-020
+and a D-024 at all.
+
 **Say on camera.** "I used AI per file against a spec I wrote first, and my rule was that nothing gets committed if I can't explain it in thirty seconds — which is why I can walk you through any file here."
 
 ---
@@ -331,6 +367,49 @@ The ambiguity is the point worth voicing. Noticing that "between zero and one" i
 **Consequences**: The .env file is relegated to a local development convenience. In production, variables are injected directly by the container runtime, keeping the code execution path identical—which is the exact prerequisite for the dev/prod switching in §8.1. The trade-off is that unit tests targeting from_env() must explicitly monkeypatch the environment, adding a couple of extra lines compared to reading directly from a file.
 
 **Say on camera.** "Config reads from the environment, not from files—the .env file is just a local convenience, requiring zero changes in production."
+
+---
+
+## D-019 — Database credentials are all required, no defaults
+
+**Status:** Accepted — a deviation from SPEC §9 Step 2, accepted after review
+
+**Context.** SPEC §9 Step 2 asked for configuration read from the environment "with sane
+defaults for all DB settings". The implementation made all five — `DB_HOST`, `DB_PORT`,
+`DB_NAME`, `DB_USER`, `DB_PASSWORD` — required, raising at startup when any is absent.
+
+**Options.**
+1. **Defaults for everything** (`localhost`, `5432`, `postgres`, …), as the spec asked.
+2. **All five required**, failing loudly at startup.
+3. Defaults for the harmless ones (host, port) and required for the rest.
+
+**Decision.** Option 2. The spec was wrong and is amended by this ADR rather than the
+other way round.
+
+**Consequences.** With defaults, a typo in `DB_NAME` does not fail — it connects
+somewhere else, and because `create_tables()` is idempotent DDL it *creates the schema
+there* and loads into it. The run reports success. The tables exist. They are in the
+wrong database, and nothing in the output says so.
+
+The deeper problem is that defaults make three different situations indistinguishable: a
+variable that was never set, a `.env` that failed to load, and a correctly configured
+environment all produce a working connection to whatever the default points at. Failing
+at startup collapses that ambiguity — if the pipeline runs at all, the configuration was
+explicit.
+
+This is also what makes the dev/prod switch in §8.1 trustworthy. Repointing `DB_NAME`
+from `sales_dev` to `sales_prod` is the entire deployment procedure, so a silently
+defaulted `DB_NAME` is a silently defaulted *environment*.
+
+Cost, and it is a real one: a fresh clone does nothing until `.env` is filled in from
+`.env.example`. There is no zero-configuration path for someone who just wants to see it
+run. That trade is accepted — the README covers the setup, and a five-line `.env` is
+cheaper than a load into the wrong database.
+
+Related: `from_env()` reads `os.environ` only and never calls `load_dotenv()` (D-018).
+The two decisions are the same instinct — configuration is explicit or it is a bug.
+
+**Say on camera.**
 
 ---
 

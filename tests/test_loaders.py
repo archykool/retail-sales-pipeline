@@ -303,8 +303,9 @@ def test_preview_leading_columns_mirror_fact_sales_declared_order(tmp_path: Path
     """The first ten columns must match §5's fact_sales order for a side-by-side read.
 
     Surrogate keys are substituted for natural ones because FactSalesRecord carries
-    natural keys by design (§7.2); provenance trails at the end so it does not disturb
-    the alignment.
+    natural keys by design (§7.2). Provenance trails at the end because this file's
+    reader asks "are the numbers right?" first, where the rejected CSV's reader asks
+    "which row?" — column order follows the reader, so the two writers differ on purpose.
     """
     from src.loaders import FactPreviewWriter
 

@@ -14,6 +14,11 @@ human owner wins over everything.
   sequential in build order — see the two-way map in SPEC §9.0 and never renumber
   a step without being asked.
 - **Do not start step N+1 until the owner explicitly says so.** Wait for go-ahead.
+- **Holding means stop writing code, not just stop committing.** If you are waiting on a
+  ruling, wait with a **clean tree**. Writing ahead while a decision is outstanding is how
+  one-step-one-commit gets broken: two steps end up in one file, no path-scoped commit can
+  separate them, and the git log stops being evidence of the process. When work is
+  genuinely independent by file path, say so and keep the paths disjoint.
 - **Do not modify files outside the current step's scope.**
 - **Do not add dependencies** that aren't already in `requirements.txt`.
 - **No `float` for money. Ever.** Use `decimal.Decimal`; round once at the end,

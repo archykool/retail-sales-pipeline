@@ -1,14 +1,18 @@
 """
-Getting data out of the pipeline — to disk here, to PostgreSQL at Steps 8a and 8b.
+Getting data out of the pipeline — to disk, and to PostgreSQL.
 
-Two local writers live here. `RejectedRecordWriter` quarantines what failed;
-`FactPreviewWriter` shows what would be loaded. Both run in dry-run mode, neither
-opens a database connection, and that is the point of §8.1: dry-run proves the logic
-without proving the load, and those are different claims.
+Three things live here. `RejectedRecordWriter` quarantines what failed;
+`FactPreviewWriter` shows what would be loaded; `DatabaseConnection` owns the
+transaction boundary. `PostgresLoader` joins them at Step 8b.
 
-Imports `models` and nothing else from the pipeline. In particular **not
-`validators`** — that is the back-edge §3.1 forbids, and it would be an easy one to
-introduce, since the column names these writers want are already defined there.
+The two writers run in dry-run mode and neither opens a database connection, which is
+the point of §8.1: dry-run proves the logic without proving the load, and those are
+different claims. `DatabaseConnection` is the line between them.
+
+From the pipeline layers this imports `models` only — and, for type annotations alone,
+`config`, which §3.1 permits as a leaf. In particular **not `validators`**: that is the
+back-edge §3.1 forbids, and it would be an easy one to introduce, since the column names
+these writers want are already defined there.
 
 **The two writers do not agree on filenames, deliberately but not ideally.**
 `FactPreviewWriter` writes a fixed name and overwrites, matching what §7.3's
@@ -23,8 +27,15 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import psycopg
+from psycopg import Connection
 
 from .models import FactSalesRecord, RejectedRecord
+
+if TYPE_CHECKING:  # import only for annotations, so loaders stays runnable without config
+    from .config import PipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +51,16 @@ logger = logging.getLogger(__name__)
 # `sales_key`, `run_id` and `loaded_at` are absent: all three are generated at insert
 # time, so nothing before the load can know them.
 #
-# The first ten columns therefore line up positionally with `fact_sales` for a
-# side-by-side read, once the surrogate keys are joined back to natural ones — the
-# `-- PREVIEW COMPARISON` query at Step 13. `row_num` and `source_file` trail at the
-# end so provenance survives (D-020) without disturbing that alignment.
+# The `-- PREVIEW COMPARISON` query at Step 13 joins the surrogate keys back to natural
+# ones so the table can be read against this file directly.
+#
+# `row_num` and `source_file` trail at the end, where the rejected CSV leads with them.
+# That is not an inconsistency between the two writers — **the two files have different
+# readers, and column order follows the reader's first question.** Whoever opens the
+# rejected CSV is asking "which row do I go fix?", so provenance leads. Whoever opens the
+# preview is asking "are the numbers right before I load this?", so the measures lead and
+# provenance is there for when the answer is no (D-020). Each convention is correct for
+# its reader; a shared one would be wrong for both.
 FACT_PREVIEW_COLUMNS = (
     "order_id",
     "order_date",
@@ -233,3 +250,89 @@ class FactPreviewWriter:
             "row_num": fact.row_num,
             "source_file": fact.source_file,
         }
+
+
+class DatabaseConnection:
+    """One transaction for one pipeline run, as a context manager (§7.4).
+
+    Commit on clean exit, rollback on any exception, close either way. The reason the
+    boundary is the whole run rather than per-table is D-008: a run that loaded
+    dimensions and then failed on facts would leave the warehouse in a state no query
+    could interpret — dimensions describing rows that do not exist. All-or-nothing means
+    a failed run leaves the database exactly as it was, and the rejected CSV on disk
+    still explains why (`RejectedRecordWriter` runs before any of this).
+
+    Never suppresses an exception. `__exit__` returns `False` so a failure that rolled
+    back still reaches the caller — a silent rollback would report success on a run that
+    loaded nothing.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        dbname: str,
+        user: str,
+        password: str,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.dbname = dbname
+        self.user = user
+        self.password = password
+        self._connection: Connection | None = None
+
+    @classmethod
+    def from_config(cls, config: "PipelineConfig") -> "DatabaseConnection":
+        """Build from `PipelineConfig`.
+
+        Kept as a separate constructor so the class can be instantiated with plain
+        arguments in a test without assembling a whole config, while `main.py` still
+        wires it in one line.
+        """
+        return cls(
+            host=config.db_host,
+            port=config.db_port,
+            dbname=config.db_name,
+            user=config.db_user,
+            password=config.db_password,
+        )
+
+    def __enter__(self) -> Connection:
+        """Open the connection with autocommit off, so the block is one transaction."""
+        self._connection = psycopg.connect(
+            host=self.host,
+            port=self.port,
+            dbname=self.dbname,
+            user=self.user,
+            password=self.password,
+            autocommit=False,
+        )
+        logger.info("connected to %s on %s:%s", self.dbname, self.host, self.port)
+        return self._connection
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        """Commit or roll back, then always close.
+
+        The `finally` matters: a failure during `commit()` itself must still close the
+        connection, or a long-running process leaks one per failed run.
+        """
+        if self._connection is None:  # pragma: no cover - __enter__ raised
+            return False
+
+        try:
+            if exc_type is None:
+                self._connection.commit()
+                logger.info("committed transaction on %s", self.dbname)
+            else:
+                self._connection.rollback()
+                logger.warning(
+                    "rolled back transaction on %s after %s",
+                    self.dbname,
+                    exc_type.__name__,
+                )
+        finally:
+            self._connection.close()
+            self._connection = None
+
+        return False  # never swallow the exception that caused the rollback

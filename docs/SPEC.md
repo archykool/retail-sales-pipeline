@@ -118,7 +118,8 @@ Beaconfire_Sales/                 <- repo root, remote: retail-sales-pipeline.gi
 │   ├── test_extractors.py
 │   ├── test_validators.py
 │   ├── test_transformers.py
-│   └── test_loaders.py
+│   ├── test_loaders.py
+│   └── test_database.py           # skips when Postgres is unreachable
 ├── scripts/
 │   └── generate_demo_data.py
 ├── .env.example
@@ -703,6 +704,27 @@ The reconciliation block also asserts `SUM(gross) - SUM(discount) - SUM(net)`, w
 expected value is **-0.03**, not zero (D-024) — with a comment saying so and why.
 Demonstrating a predicted non-zero is stronger than demonstrating a zero: a zero can
 come from two errors cancelling or from a check that is not running.
+
+Plus a `-- PREVIEW COMPARISON` block, which mirrors `preview_fact_sales.csv` column for
+column so the dry-run artifact and the loaded table can be read side by side:
+
+```sql
+-- PREVIEW COMPARISON: mirrors preview_fact_sales.csv column for column.
+-- The two joins ARE the surrogate-key mechanism, made visible: natural keys are
+-- swapped for integer keys at load time (§7.2) and swapped back at query time.
+-- Nothing else in the project shows both halves of that trade in one statement.
+SELECT c.customer_id, p.product_id, f.order_id, f.order_date,
+       f.quantity, f.unit_price, f.discount_rate,
+       f.gross_sales, f.discount_amount, f.net_sales
+FROM fact_sales f
+JOIN dim_customers c USING (customer_key)
+JOIN dim_products  p USING (product_key)
+ORDER BY f.order_id;
+```
+
+The join is not a workaround for the preview's column substitution — it is the thing worth
+showing. D-005's cost ("`fact_sales` shows `product_key = 7`, not `SKU-1042`") and its
+mechanism are the same two lines.
 
 **Exit:** every query returns plausible non-empty results.
 **Commit:** `feat: analytics and reconciliation queries`
