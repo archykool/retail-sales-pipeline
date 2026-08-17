@@ -112,6 +112,9 @@ Beaconfire_Sales/                 <- repo root, remote: retail-sales-pipeline.gi
 │   ├── loaders.py                # RejectedRecordWriter, DatabaseConnection, PostgresLoader
 │   └── pipeline.py               # SalesPipeline
 ├── tests/
+│   ├── __init__.py
+│   ├── test_models.py
+│   ├── test_extractors.py
 │   ├── test_validators.py
 │   └── test_transformers.py
 ├── scripts/
@@ -275,7 +278,7 @@ Every rule gets a stable `reason_code` so rejections are groupable in SQL.
 | Code | Rule | Why it matters |
 |---|---|---|
 | `DUPLICATE_ORDER_ID` | `order_id` already seen in this file | protects fact grain; without it revenue double-counts |
-| `SCHEMA_MISMATCH` | CSV header missing/extra columns | fails the whole file fast, before row processing |
+| `SCHEMA_MISMATCH` | file-level shape error: CSV header missing/extra columns, a row with more fields than the header, or reference JSON that is not an array of objects | fails the whole file fast, before row processing |
 | `DATE_IN_FUTURE` | `order_date > today` | classic data-entry symptom |
 | `DATE_OUT_OF_PERIOD` | `order_date` outside the month in the filename | catches a wrong file dropped in the folder |
 | `DISCOUNT_EQ_ONE` | `discount_rate == 1.0` | 100% off yields `net_sales = 0`; suspicious, not free |

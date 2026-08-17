@@ -24,6 +24,11 @@ from .models import RawSalesRecord
 
 T = TypeVar("T")
 
+# Sentinel key DictReader parks surplus values under. A row carrying it has more
+# fields than the header, which is a shape error, not a value error — see
+# CSVExtractor.extract().
+EXTRA_FIELDS_KEY = "__extra__"
+
 # The header CSVExtractor requires. Order here is the canonical column order that
 # the validator's tie-breaking rule refers to (D-021); the file itself may present
 # the columns in any order, since records are read by name.
@@ -71,7 +76,16 @@ class Extractor(ABC, Generic[T]):
 
 
 class CSVExtractor(Extractor[RawSalesRecord]):
-    """Reads the sales CSV into `RawSalesRecord`s — strings only, nothing validated."""
+    """Reads the sales CSV into `RawSalesRecord`s — strings only, nothing validated.
+
+    **Assumes one record occupies one physical line.** `row_num` comes from the
+    reader's physical line counter, so a quoted field containing an embedded
+    newline would make the counter jump and every row number after it would stop
+    matching the line a human sees in Excel — and stop matching the row numbers
+    `docs/bad_records_catalogue.md` quotes. The assumption holds for the committed
+    data and is pinned by a test asserting 200 records ending at row 201, so a
+    file that ever breaks it fails loudly instead of shifting provenance silently.
+    """
 
     def extract(self) -> list[RawSalesRecord]:
         """Read every data row, preserving its physical line number.
@@ -90,10 +104,13 @@ class CSVExtractor(Extractor[RawSalesRecord]):
             # restval="" makes a short row yield empty strings rather than None,
             # keeping every field a str. The absent value then reaches the
             # validator as MISSING_FIELD, which is where that judgment belongs.
-            reader = csv.DictReader(handle, restval="")
+            # restkey collects surplus values instead of discarding them, so a
+            # too-long row can be caught rather than silently truncated.
+            reader = csv.DictReader(handle, restval="", restkey=EXTRA_FIELDS_KEY)
             self._require_expected_header(reader.fieldnames)
 
             for row in reader:
+                self._require_no_surplus_fields(row, reader.line_num)
                 records.append(
                     RawSalesRecord(
                         # reader.line_num, not enumerate(): DictReader silently
@@ -122,6 +139,13 @@ class CSVExtractor(Extractor[RawSalesRecord]):
         reordering columns changes nothing about correctness and rejecting it would
         be a false positive. Missing and extra columns are reported separately
         because they point at different causes — a dropped field versus an added one.
+
+        The cost of not checking order: two same-typed columns swapped in both the
+        header and the data pass this check, and the swap *may* be caught
+        downstream rather than certainly. `order_id` ↔ `quantity` is the awkward
+        case — the quantities become values near 1000, which sits right on
+        `QTY_EXCEEDS_THRESHOLD`'s boundary, while the `order_id` side looks clean.
+        Order-sensitivity would catch it; it would also reject correct files.
         """
         if fieldnames is None:
             raise SchemaMismatchError(
@@ -143,6 +167,26 @@ class CSVExtractor(Extractor[RawSalesRecord]):
             raise SchemaMismatchError(
                 f"{self.path.name}: header mismatch — {'; '.join(details)}. "
                 f"Expected exactly {list(EXPECTED_SALES_COLUMNS)}"
+            )
+
+    def _require_no_surplus_fields(self, row: dict[str, Any], line_num: int) -> None:
+        """Fail the file if a row carries more fields than the header declares.
+
+        The same failure class as a bad header, one scope down: the shape is wrong,
+        so the values cannot be trusted by position. Reading such a row would mean
+        deciding which of eight values belongs to seven columns, and a trailing
+        comma is indistinguishable from a genuinely misaligned row.
+
+        Aborts rather than rejecting the single row, because a shape error usually
+        means the whole file was produced wrong; quarantining row by row would
+        report hundreds of problems where there is one.
+        """
+        if EXTRA_FIELDS_KEY in row:
+            surplus = row[EXTRA_FIELDS_KEY]
+            raise SchemaMismatchError(
+                f"{self.path.name}: line {line_num} has "
+                f"{len(EXPECTED_SALES_COLUMNS) + len(surplus)} fields, expected "
+                f"{len(EXPECTED_SALES_COLUMNS)} — surplus {surplus}"
             )
 
 

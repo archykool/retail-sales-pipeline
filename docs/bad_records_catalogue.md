@@ -230,6 +230,18 @@ keeping `data/raw/` at the three files SPEC §3 lists. Flagging it because it is
 the one code in §6 with no row in this catalogue, and that absence should be
 deliberate rather than look like an oversight.
 
+The code covers three file-level shape errors, all of which abort: a CSV header
+with missing or extra columns, a CSV **row** carrying more fields than the header
+(no way to know which value belongs to which column, so it cannot be parsed
+positionally at all), and reference JSON that is not an array of objects.
+
+**`SCHEMA_MISMATCH` never appears in `etl_rejected_sales`.** It aborts the run, so
+no row is ever written under it — unlike every other code in §6, which lands in the
+rejected table. If someone asks to see one, the evidence is the raised exception and
+the tests that pin it, not a database row. Worth saying plainly rather than letting
+it look like a gap in the audit trail: the whole point of the code is that the run
+does not reach the point where rejections are recorded.
+
 ---
 
 ## 8. Reference data requirements

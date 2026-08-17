@@ -78,6 +78,24 @@ def test_csv_row_numbers_span_two_to_two_hundred_and_one() -> None:
     assert [r.row_num for r in records] == list(range(2, 202))
 
 
+def test_csv_one_record_per_physical_line() -> None:
+    """Pins the assumption `row_num` depends on: one record occupies one line.
+
+    Asserted as a single claim rather than split across two tests, because it is one
+    assumption. `row_num` is the reader's physical line counter, which jumps if a
+    quoted field contains an embedded newline. Should that ever appear in the sales
+    file, the count and the final row number stop agreeing and this fails — instead
+    of every row number after the offending line silently drifting out of step with
+    the catalogue and with what Excel displays.
+    """
+    records = CSVExtractor(SALES_CSV).extract()
+
+    assert len(records) == 200
+    assert records[-1].row_num == 201
+    # 200 records spanning lines 2..201 leaves no room for a multi-line record.
+    assert records[-1].row_num - records[0].row_num + 1 == len(records)
+
+
 def test_csv_source_file_is_the_filename_not_the_path() -> None:
     """source_file is the idempotency key in §7.3, so it must not vary by machine.
 
@@ -224,6 +242,37 @@ def test_csv_extra_column_raises_schema_mismatch(tmp_path: Path) -> None:
     )
 
     with pytest.raises(SchemaMismatchError, match="sales_rep"):
+        CSVExtractor(path).extract()
+
+
+def test_csv_trailing_comma_raises_schema_mismatch(tmp_path: Path) -> None:
+    """A row with more fields than the header is a shape error, not a bad value.
+
+    Nothing in §6 covers it, and inventing a row-level code would be wrong: with
+    eight values for seven columns there is no way to know which value belongs to
+    which column, so the row cannot be parsed positionally at all. Silently dropping
+    the surplus — DictReader's default — would discard data without saying so.
+    """
+    path = write_csv(
+        tmp_path / "trailing.csv",
+        HEADER_LINE,
+        GOOD_ROW + ",",  # eight fields for seven columns
+    )
+
+    with pytest.raises(SchemaMismatchError, match="line 2 has 8 fields"):
+        CSVExtractor(path).extract()
+
+
+def test_csv_surplus_fields_report_their_line_number(tmp_path: Path) -> None:
+    """The error has to name the offending line to be actionable."""
+    path = write_csv(
+        tmp_path / "surplus.csv",
+        HEADER_LINE,
+        GOOD_ROW,
+        GOOD_ROW + ",Dana,extra",
+    )
+
+    with pytest.raises(SchemaMismatchError, match="line 3 has 9 fields"):
         CSVExtractor(path).extract()
 
 
