@@ -12,6 +12,20 @@ guard did `assert "from .loaders" not in source`, which is wrong twice over: it 
 violation for the phrase appearing in a docstring, and it misses `import src.loaders`,
 `from src import loaders`, and `from src.loaders import PostgresLoader`. Parsing sees what
 Python sees.
+
+The general form of that lesson: **a guard that can false-positive is worse than no guard,
+because it trains you to ignore it.** And its mirror image, which is the step most often
+skipped — a test asserting something's *absence* passes for free when it is looking in the
+wrong place. So the parser's output was checked against the real dependency graph before
+these assertions were trusted; a `src_imports` that returned empty sets would make every
+test in the first half of this file pass while enforcing nothing.
+
+**`ALLOWED` is an upper bound, and the gap between it and reality is the point.** Every
+layer currently imports strictly less than it is permitted to: `extractors`, `validators`
+and `transformers` import only `models`, against a permission of two, three and four
+modules respectively. If the two matched exactly there would be no way to tell a real
+constraint from one traced around whatever the code happened to already do — the bound
+would be a description rather than a rule, and it would have nothing left to catch.
 """
 
 from __future__ import annotations
@@ -244,6 +258,22 @@ def test_every_documented_reason_code_is_implemented() -> None:
 
     The more embarrassing direction: the spec claims a rule the pipeline does not enforce,
     and the data it was meant to catch flows straight through.
+
+    **This test found exactly that on its first run, and it is the clearest argument for
+    this whole file.** `KEY_NORMALIZED` existed only as a substring inside a log *format*
+    string — `"KEY_NORMALIZED %s row %d: ..."` — and never as an identifier. Three
+    consequences, all silent:
+
+    - `GROUP BY reason_code` could never see it, so D-013's claim that "rejections are
+      aggregable in SQL" was hollow for that one code while appearing to hold for all of
+      them.
+    - A typo in it would have been invisible to every layer at once: no test referenced it,
+      no type contained it, no constraint mentioned it, because it was not a name.
+    - Nothing would ever have failed. The cleaning worked; only the label was unreachable.
+
+    Review had passed over it repeatedly. A mechanical check caught it immediately, because
+    the claim "every documented code is implemented" is the kind of thing that can be
+    executed instead of asserted — which is what this file does to §3.1 as well.
     """
     missing = SPEC_REASON_CODES - implemented_reason_codes()
 
