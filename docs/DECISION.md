@@ -863,11 +863,19 @@ one that does not, which is exactly backwards.
 Both errors were found by reading output, not by re-reading the claim. Neither would have
 been caught by review, because both read as correct.
 
+**A second instance, one layer up.** The cross-reference sweep written to validate every
+`§`, ADR number and filename across the docs reported 59 broken references. Fifty-four were
+the checker's own fault — regexes stripping the leading dot from `.env.example`, matching
+test *file* names against a test *function* pattern, and flagging `tmp_path` fixtures that
+only exist at runtime. Three were real. **A check's value depends on knowing its error rate,
+and a checker nobody has calibrated produces confident noise** — which is the more dangerous
+output, because volume reads as thoroughness.
+
 **Say on camera.**
 
 ---
 
-## Open questions (Q2 and Q3 resolve before Step 5; Q4 and Q5 before Step 8)
+## Open questions (Q2 and Q3 resolved before Step 5; Q4 and Q5 before Step 8; Q6 is open with no deadline)
 
 | # | Question | Leaning |
 |---|---|---|
@@ -876,6 +884,12 @@ been caught by review, because both read as correct.
 | Q3 | `unit_price` with 3+ decimals — reject or round? | Reject. Silently rounding money changes the number without telling anyone. |
 | Q4 | Should `etl_run_log` be in scope? | Yes — it is ~10 lines and it makes the reconciliation query in SPEC §8.2 possible, which is the direct answer to the assignment's "how do you know it's correct." |
 | Q5 | Does `stg_sales` hold raw strings or typed valid rows? | Typed valid rows, per the assignment's "staging table for valid sales records." Note in the video that a stricter definition of staging would keep raw text and validate downstream — knowing the alternative is worth mentioning. |
+| Q6 | The rejected CSV accumulates (`_2` suffix); the preview CSV overwrites; §7.3 makes the database replace on rerun. Is that asymmetry right? | **Unresolved.** Leaning: make both writers overwrite, matching the database — history is git's job and the backup's, not the pipeline's. Against: the rejected file is the only record of what went wrong, and overwriting it loses the previous run's diagnosis. |
+
+Q6 replaces two references to a "Step 14" that no longer exists. Steps 14–15 were folded
+into §11 and §12, and this deferral outlived the step it deferred to — so it read as a plan
+while actually being a dead end. It is recorded here as genuinely open rather than pending,
+because both sides of it are arguable and inventing an answer would be worse than saying so.
 
 ---
 

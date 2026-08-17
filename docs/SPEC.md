@@ -604,7 +604,7 @@ missing file is ambiguous. **Must open with `newline=""`** (§14). `raw_payload`
 serialises as JSON in one column, matching the `JSONB` column in §5, so the file and
 the table carry one audit record in one structure.
 
-Known asymmetry, deferred to Step 14: this writer accumulates one file per run while
+Known asymmetry, open as Q6: this writer accumulates one file per run while
 §7.3 makes a rerun *delete* the prior run's rows from `etl_rejected_sales`. After
 several reruns there are many files and one table state, so file/table parity holds
 only for the newest file. Documented in the writer's docstring; do not claim parity

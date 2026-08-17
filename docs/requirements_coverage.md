@@ -27,7 +27,7 @@ PDF but not assigned to a numbered step.
 
 | PDF item | Requirement | File | ADR | Verified by |
 |---|---|---|---|---|
-| p.1 goals | Separate responsibilities across classes | all of `src/` | D-014 | `SPEC.md` §3.1; `test_transformers.py::test_transformers_module_does_not_import_the_database_layer`, `test_loaders.py::test_loaders_module_does_not_import_the_validator` |
+| p.1 goals | Separate responsibilities across classes | all of `src/` | D-014 | `SPEC.md` §3.1, enforced from the AST by `test_architecture.py` — `::test_module_imports_respect_the_one_way_rule` (every module), `::test_transformers_does_not_import_loaders`, `::test_loaders_does_not_import_validators`, `::test_only_pipeline_knows_the_whole_story` |
 | p.1 goals | Use abstraction / inheritance | `src/extractors.py` — `Extractor(ABC)` | — | `test_extractors.py::test_extractor_base_class_cannot_be_instantiated`, `::test_concrete_extractors_are_extractors` |
 | p.1 goals | Read and validate real-world messy data | `src/extractors.py`, `src/validators.py` | D-004, D-021 | `bad_records_catalogue.md` §2 — 172 valid / 28 rejected, matched row for row |
 | p.1 goals | Build a dimensional model | `sql/schema.sql` | D-005 | Step 8a; six tables |

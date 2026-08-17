@@ -156,7 +156,9 @@ class RejectedRecordWriter:
         true of the newest file. Do not claim parity without that qualification.
         `FactPreviewWriter` in this same module does the opposite: fixed filename,
         overwrite, which does match the database. Whether both should overwrite is
-        deferred to Step 14.
+        **open as Q6** in DECISION.md — genuinely unresolved rather than pending, because
+        overwriting matches the database while accumulating preserves the previous run's
+        diagnosis, and the rejected file is the only place that diagnosis exists.
         """
         stem = f"rejected_{datetime.now().strftime(_FILENAME_TIMESTAMP)}"
         candidate = self.output_dir / f"{stem}.csv"
