@@ -15,9 +15,9 @@ import os
 class PipelineConfig:
     """Database and file paths for the ETL pipeline.
 
-    All values come from environment variables (sourced via python-dotenv
-    from .env). Required values raise immediately if missing; optional values
-    have sensible defaults.
+    All values come from environment variables. Required values raise immediately
+    if missing; optional values have sensible defaults. The entry point (main.py)
+    owns calling load_dotenv() to populate the environment before from_env() runs.
     """
 
     # Database
@@ -69,8 +69,8 @@ class PipelineConfig:
             raise ValueError("Required env var missing: DB_PORT")
         try:
             db_port = int(db_port_str)
-        except ValueError:
-            raise ValueError(f"DB_PORT must be an integer, got: {db_port_str}")
+        except ValueError as e:
+            raise ValueError(f"DB_PORT must be an integer, got: {db_port_str}") from None
 
         db_name = os.getenv("DB_NAME")
         if not db_name:
@@ -109,15 +109,15 @@ class PipelineConfig:
         max_quantity_str = os.getenv("MAX_QUANTITY", "1000")
         try:
             max_quantity = int(max_quantity_str)
-        except ValueError:
-            raise ValueError(f"MAX_QUANTITY must be an integer, got: {max_quantity_str}")
+        except ValueError as e:
+            raise ValueError(f"MAX_QUANTITY must be an integer, got: {max_quantity_str}") from None
 
         # Optional loader tuning
         load_batch_size_str = os.getenv("LOAD_BATCH_SIZE", "1000")
         try:
             load_batch_size = int(load_batch_size_str)
-        except ValueError:
-            raise ValueError(f"LOAD_BATCH_SIZE must be an integer, got: {load_batch_size_str}")
+        except ValueError as e:
+            raise ValueError(f"LOAD_BATCH_SIZE must be an integer, got: {load_batch_size_str}") from None
 
         return cls(
             db_host=db_host,
