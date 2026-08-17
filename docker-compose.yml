@@ -1,0 +1,28 @@
+# PostgreSQL for the sales pipeline. Credentials come from .env (gitignored);
+# .env.example documents the variable names. Start with: docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    container_name: sales_postgres
+    environment:
+      # Container-init vars are sourced from the same DB_* values the app reads,
+      # so one .env drives both the database and src/config.py.
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      # host:container — repoint the host side in .env only if 5432 is taken.
+      - "${DB_PORT}:5432"
+    volumes:
+      - sales_pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      # pg_isready lets `docker compose up -d` report a truly ready database,
+      # not just a started container.
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  sales_pgdata:
