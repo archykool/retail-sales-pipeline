@@ -6,10 +6,6 @@ clone without `docker compose up` should see skips, not red.
 
 Every test gets a disposable schema. `sales_dev` is the database demonstrated on camera,
 and a suite that populates or truncates it can invalidate the demo.
-
-Note: `test_database.py` still defines its own copies of `db_params` and `schema` from
-before these moved here. pytest resolves the closest definition, so that file keeps
-working unchanged; the local copies are redundant and can be deleted in a follow-up.
 """
 
 from __future__ import annotations
@@ -34,14 +30,23 @@ PINNED_TODAY = "2026-08-17"
 
 
 @pytest.fixture(scope="session")
-def db_params() -> dict:
-    """Connection parameters, or skip everything that needs a database."""
+def pipeline_config() -> PipelineConfig:
+    """The real config, or skip. Loading `.env` is the entry point's job (D-018).
+
+    The test suite is an entry point, so it calls `load_dotenv()` here rather than expecting
+    `from_env()` to do it.
+    """
     load_dotenv()
     try:
-        config = PipelineConfig.from_env()
+        return PipelineConfig.from_env()
     except ValueError as error:
         pytest.skip(f"database env vars not configured: {error}")
 
+
+@pytest.fixture(scope="session")
+def db_params(pipeline_config: PipelineConfig) -> dict:
+    """Connection parameters, or skip everything that needs a database."""
+    config = pipeline_config
     params = {
         "host": config.db_host,
         "port": config.db_port,

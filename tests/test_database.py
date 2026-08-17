@@ -15,19 +15,13 @@ is an absence someone eventually fills in.
 
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import uuid4
-
 import pytest
 
 psycopg = pytest.importorskip("psycopg", reason="psycopg not installed")
 
-from dotenv import load_dotenv  # noqa: E402
-
-from src.config import PipelineConfig  # noqa: E402
 from src.loaders import DatabaseConnection  # noqa: E402
 
-SCHEMA_SQL = Path(__file__).resolve().parent.parent / "sql" / "schema.sql"
+from .conftest import SCHEMA_SQL  # noqa: E402
 
 EXPECTED_TABLES = {
     "etl_run_log",
@@ -37,46 +31,6 @@ EXPECTED_TABLES = {
     "fact_sales",
     "etl_rejected_sales",
 }
-
-
-@pytest.fixture(scope="module")
-def db_params() -> dict:
-    """Connection parameters, or skip the module if there is nothing to connect to."""
-    load_dotenv()
-    try:
-        config = PipelineConfig.from_env()
-    except ValueError as error:
-        pytest.skip(f"database env vars not configured: {error}")
-
-    params = {
-        "host": config.db_host,
-        "port": config.db_port,
-        "dbname": config.db_name,
-        "user": config.db_user,
-        "password": config.db_password,
-    }
-
-    try:
-        with psycopg.connect(**params, connect_timeout=3) as connection:
-            connection.execute("SELECT 1")
-    except Exception as error:  # noqa: BLE001 - any failure means "no database here"
-        pytest.skip(f"postgres unreachable ({type(error).__name__}): {error}")
-
-    return params
-
-
-@pytest.fixture
-def schema(db_params: dict):
-    """A disposable schema per test, so nothing touches the demo database's public tables."""
-    name = f"t_{uuid4().hex[:12]}"
-
-    with psycopg.connect(**db_params, autocommit=True) as connection:
-        connection.execute(f'CREATE SCHEMA "{name}"')
-    try:
-        yield name
-    finally:
-        with psycopg.connect(**db_params, autocommit=True) as connection:
-            connection.execute(f'DROP SCHEMA "{name}" CASCADE')
 
 
 def apply_ddl(db_params: dict, schema: str) -> None:
@@ -335,12 +289,9 @@ def test_connection_is_closed_after_a_failed_block(db_params: dict) -> None:
     assert captured.closed
 
 
-def test_from_config_builds_a_usable_connection(db_params: dict) -> None:
+def test_from_config_builds_a_usable_connection(db_params: dict, pipeline_config) -> None:
     """main.py wires this in one line; the plain constructor keeps tests config-free."""
-    load_dotenv()
-    config = PipelineConfig.from_env()
-
-    with DatabaseConnection.from_config(config) as connection:
+    with DatabaseConnection.from_config(pipeline_config) as connection:
         assert connection.execute("SELECT 1").fetchone()[0] == 1
 
 
