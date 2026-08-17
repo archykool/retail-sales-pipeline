@@ -347,3 +347,77 @@ def test_no_module_imports_an_undeclared_dependency() -> None:
                 f"src/{module}.py imports {package!r}, which is not in requirements.txt "
                 f"(declared: {sorted(declared)})"
             )
+
+
+# ======================================================================
+# Numbers written in prose must match reality
+# ======================================================================
+
+ROOT = SRC.parent
+README = ROOT / "README.md"
+DECISION = ROOT / "docs" / "DECISION.md"
+
+
+def adr_numbers() -> list[int]:
+    return [
+        int(n)
+        for n in re.findall(r"^## D-(\d+)", DECISION.read_text(encoding="utf-8"), re.M)
+    ]
+
+
+def test_readme_adr_count_matches_decision_log() -> None:
+    """The README says "N ADRs"; DECISION.md decides what N is.
+
+    This was wrong within ten minutes of being written — the count was taken before the
+    next ADR was added. A number in prose that nothing checks is a number that drifts, and
+    it drifts silently, which is the same argument as the reason-code coverage test above.
+    """
+    claimed = re.search(r"(\d+) ADRs", README.read_text(encoding="utf-8"))
+
+    assert claimed, "README no longer states an ADR count — remove this test or restore it"
+    assert int(claimed.group(1)) == len(adr_numbers()), (
+        f"README claims {claimed.group(1)} ADRs; DECISION.md has {len(adr_numbers())}"
+    )
+
+
+def test_adr_numbers_are_contiguous() -> None:
+    """No gaps in D-001..D-0NN.
+
+    A gap means either a withdrawn decision or a numbering slip, and the two are
+    indistinguishable later — this project already spent a turn establishing that D-019 was
+    the second kind. Cheap to keep true while ADRs are still being added.
+    """
+    numbers = adr_numbers()
+
+    assert numbers == list(range(1, len(numbers) + 1)), (
+        f"gaps or duplicates in the ADR sequence: {numbers}"
+    )
+
+
+def test_readme_test_count_matches_the_suite() -> None:
+    """The README says "N tests"; collection decides what N is.
+
+    Runs collection in a subprocess rather than reading `request.session`, because the
+    session count reflects whatever subset was selected on the command line — this test
+    would then pass or fail based on how it was invoked rather than on whether the README
+    is accurate.
+    """
+    import subprocess
+    import sys
+
+    claimed = re.search(r"(\d+) tests", README.read_text(encoding="utf-8"))
+    assert claimed, "README no longer states a test count — remove this test or restore it"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    collected = re.search(r"(\d+) tests? collected", result.stdout)
+
+    assert collected, f"could not parse collection output:\n{result.stdout[-500:]}"
+    assert int(claimed.group(1)) == int(collected.group(1)), (
+        f"README claims {claimed.group(1)} tests; collection found {collected.group(1)}"
+    )

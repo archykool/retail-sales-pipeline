@@ -161,7 +161,7 @@ contents differ; the labels were reused.
 pytest -q
 ```
 
-280 tests. Those needing PostgreSQL **skip** rather than fail when it is unreachable, so a
+283 tests. Those needing PostgreSQL **skip** rather than fail when it is unreachable, so a
 fresh clone without `docker compose up` gives skips instead of red. Database tests run in
 disposable schemas and never touch `sales_dev`.
 
