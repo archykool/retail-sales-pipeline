@@ -268,14 +268,20 @@ class SalesPipeline:
         """Run one stage, logging its elapsed time and how much it produced.
 
         Timing every stage rather than only the run makes the log the first place to look
-        when a run gets slow, without adding a profiler. `len()` where the result supports
-        it, so the log says what happened rather than only that something did.
+        when a run gets slow, without adding a profiler.
+
+        The count is logged only for lists and dicts, not for anything with `__len__`.
+        `validate()` returns a two-tuple of lists, and `len()` on that is 2 — so the
+        obvious version logged `n=2` for a stage that processed two hundred rows. A log
+        line that is confidently wrong is worse than one that says nothing, and this one
+        was going into the README as evidence. The real split is logged by
+        `_validate` immediately afterwards.
         """
         started = datetime.now()
         outcome = action()
         elapsed = (datetime.now() - started).total_seconds()
 
-        size = len(outcome) if hasattr(outcome, "__len__") else None
+        size = len(outcome) if isinstance(outcome, (list, dict)) else None
         if size is None:
             logger.info("stage %-22s %.3fs", name, elapsed)
         else:
