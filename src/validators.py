@@ -48,6 +48,16 @@ TIER_FILE_SCOPE = 5
 
 DEFAULT_MAX_QUANTITY = 1000
 
+# The one §6 code that never lands on a RejectedRecord: whitespace and casing on IDs are
+# repaired and the record stays valid (§6.2), so this is logged rather than attached.
+#
+# Named as a constant anyway. Every other code is a string literal that appears exactly
+# where it is used; this one was originally embedded inside a log *format* string, which
+# made it the only code that could not be searched for as an identifier and the only one
+# where a typo would have been invisible. A code is a stable name (D-013) whether or not it
+# reaches the database.
+KEY_NORMALIZED = "KEY_NORMALIZED"
+
 # Joins the defects of one rejected row into `reason_detail`. Must be a sequence no
 # detail message can contain, so the string stays unambiguously splittable (D-023).
 DETAIL_SEPARATOR = " | "
@@ -455,7 +465,8 @@ class SalesDataValidator:
         cleaned = original.strip().upper()
         if cleaned != original:
             logger.info(
-                "KEY_NORMALIZED %s row %d: %s %r -> %r",
+                "%s %s row %d: %s %r -> %r",
+                KEY_NORMALIZED,
                 record.source_file,
                 record.row_num,
                 field,

@@ -780,6 +780,21 @@ empty database, and reasonably conclude the schema step never executed. It did; 
 undone. Worth saying plainly rather than discovering on camera.
 `test_a_failed_load_leaves_nothing_behind` asserts exactly this.
 
+**`etl_run_log` is the one table a rerun does not replace, and the question it provokes has
+a one-line answer.** §7.3 deletes and reinserts staging, facts and rejections scoped to
+`source_file`; the run log is deliberately excluded, because it records *runs* rather than
+data and a history that erases itself is not a history. So the row count is cumulative: two
+runs of the same file leave two rows, and the table's count is the number of loads ever
+performed against that database, not the number of distinct files or the number of runs in
+whatever transcript is on screen.
+
+The first demo of idempotency will show `SUM(net_sales)` unchanged next to a run-log count
+that went up, and that looks contradictory for about two seconds. It is not: the data was
+replaced, the audit trail was appended. Two things make it checkable rather than assertable
+— every real load records `rows_loaded`, so a dry run would be visible as a `0` and none
+exists, and `write_run_log` is reachable only from inside the load branch, which dry-run
+never enters.
+
 The honest limit of this decision: it is right at one file a day on one machine. At a
 volume where runs are monitored by something other than a person reading a log file, the
 run log has to become observable independently, and that means either a separate connection

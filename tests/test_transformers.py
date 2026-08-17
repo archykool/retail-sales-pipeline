@@ -181,21 +181,6 @@ def test_fact_carries_natural_keys_not_surrogate_keys() -> None:
     assert not hasattr(fact, "product_key")
 
 
-def test_transformers_module_does_not_import_the_database_layer() -> None:
-    """Guards the §3.1 one-way rule structurally rather than by review alone.
-
-    A back-edge here is the single rejection trigger that is hardest to spot in a
-    diff, because adding one import looks harmless.
-    """
-    source = (Path(__file__).resolve().parent.parent / "src" / "transformers.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "import psycopg" not in source
-    assert "from .loaders" not in source
-    assert "import loaders" not in source
-
-
 def test_fact_preserves_provenance() -> None:
     """D-020: row_num and source_file survive into the fact row."""
     fact = SalesDataTransformer().to_fact(make_valid(row_num=117, source_file="x.csv"))

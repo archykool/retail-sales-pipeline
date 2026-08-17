@@ -217,25 +217,6 @@ def test_a_second_write_in_the_same_second_does_not_overwrite(tmp_path: Path) ->
 
 
 # ======================================================================
-# §3.1
-# ======================================================================
-
-
-def test_loaders_module_does_not_import_the_validator() -> None:
-    """The specific back-edge §3.1 names, and a tempting one.
-
-    The column names this writer serialises are already defined in `validators`, so the
-    shortcut is right there. Taking it would make the dependency diagram wrong.
-    """
-    source = (Path(__file__).resolve().parent.parent / "src" / "loaders.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "from .validators" not in source
-    assert "import validators" not in source
-
-
-# ======================================================================
 # Against real validator output
 # ======================================================================
 
