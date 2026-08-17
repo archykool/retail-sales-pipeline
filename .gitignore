@@ -1,0 +1,13 @@
+# Secrets — never commit
+.env
+
+# Rejected-record output (keep the folder, not its contents)
+data/rejected/*
+!data/rejected/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/

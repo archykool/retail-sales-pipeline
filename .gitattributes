@@ -1,0 +1,3 @@
+# Normalize line endings: repo stores LF, checkout is native.
+# Owner is on Windows; graders may not be.
+* text=auto eol=lf
