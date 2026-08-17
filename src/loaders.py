@@ -25,14 +25,24 @@ from __future__ import annotations
 import csv
 import json
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import psycopg
 from psycopg import Connection
+from psycopg.types.json import Json
 
-from .models import FactSalesRecord, RejectedRecord
+from .models import (
+    Customer,
+    FactSalesRecord,
+    PipelineResult,
+    Product,
+    RejectedRecord,
+    ValidSalesRecord,
+)
 
 if TYPE_CHECKING:  # import only for annotations, so loaders stays runnable without config
     from .config import PipelineConfig
@@ -336,3 +346,366 @@ class DatabaseConnection:
             self._connection = None
 
         return False  # never swallow the exception that caused the rollback
+
+
+class PostgresLoader:
+    """Writes a validated run into the star schema.
+
+    Takes an open connection rather than opening one, because the transaction boundary
+    belongs to the caller (§7.4). The loader decides *what* to write and in what order;
+    `DatabaseConnection` decides when it becomes permanent. A loader that committed its
+    own work could leave dimensions loaded and facts not.
+
+    This is also the only place surrogate keys exist. `FactSalesRecord` arrives carrying
+    natural keys, and the `{business_id: surrogate_key}` dictionaries built below are the
+    entire mechanic — see D-005: a surrogate key does not exist until its dimension row
+    is inserted, so producing one requires a query, so it can only happen here.
+    """
+
+    def __init__(
+        self,
+        connection: Connection,
+        *,
+        batch_size: int = 1000,
+        schema_path: Path | None = None,
+    ) -> None:
+        self.connection = connection
+        self.batch_size = batch_size
+        self.schema_path = schema_path or (
+            Path(__file__).resolve().parent.parent / "sql" / "schema.sql"
+        )
+
+    # ------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------
+
+    def create_tables(self) -> None:
+        """Apply `sql/schema.sql`.
+
+        Safe on every run because the DDL is `IF NOT EXISTS` throughout. **That makes it
+        idempotent, not migrating**: an existing table is skipped whole, so a column or
+        constraint added to the file later will not appear on a database that already has
+        the table. Changing the schema means `docker compose down -v`, the same trap §14
+        records for the container's init scripts.
+        """
+        self.connection.execute(self.schema_path.read_text(encoding="utf-8"))
+        logger.info("applied schema from %s", self.schema_path)
+
+    # ------------------------------------------------------------------
+    # Idempotency (§7.3) — must run before any insert
+    # ------------------------------------------------------------------
+
+    def delete_previous_load(self, source_file: str, order_ids: Sequence[int]) -> None:
+        """Remove what a previous load of this file wrote, so a rerun replaces it.
+
+        Three deletes, and the first is the one that is easy to get wrong.
+
+        `fact_sales` has no `source_file` column, so facts cannot be scoped by file
+        directly — §7.3 says to delete by "this file's order IDs". Deleting only the
+        order_ids in the *current* load is not enough: if a row was valid last run and has
+        since been edited into a rejection, or removed from the file entirely, its old
+        fact row is not in the new set and would survive as a stale fact that no source
+        row explains. So the first delete reaches through `stg_sales`, which *does* keep
+        `source_file` (D-020), to find what the previous load of this file actually wrote.
+
+        That is provenance paying for itself in a way that has nothing to do with
+        debugging: `stg_sales.source_file` is what makes the fact table's idempotency
+        expressible at all.
+
+        Dimensions are never deleted, only upserted (§7.3). A customer does not stop
+        existing because one file stopped mentioning them.
+        """
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM fact_sales WHERE order_id IN"
+                " (SELECT order_id FROM stg_sales WHERE source_file = %s)",
+                (source_file,),
+            )
+            facts_removed = cursor.rowcount
+
+            if order_ids:
+                # Also clear this load's own order_ids, in case the same order arrived
+                # under a different filename. order_id is UNIQUE on fact_sales, so a
+                # collision aborts the whole transaction rather than replacing a row.
+                cursor.execute(
+                    "DELETE FROM fact_sales WHERE order_id = ANY(%s)",
+                    (list(order_ids),),
+                )
+                facts_removed += cursor.rowcount
+
+            cursor.execute(
+                "DELETE FROM stg_sales WHERE source_file = %s", (source_file,)
+            )
+            staged_removed = cursor.rowcount
+
+            cursor.execute(
+                "DELETE FROM etl_rejected_sales WHERE source_file = %s", (source_file,)
+            )
+            rejected_removed = cursor.rowcount
+
+        logger.info(
+            "cleared previous load of %s: %d facts, %d staged, %d rejected",
+            source_file,
+            facts_removed,
+            staged_removed,
+            rejected_removed,
+        )
+
+    # ------------------------------------------------------------------
+    # Dimensions — before facts, always
+    # ------------------------------------------------------------------
+
+    def upsert_dim_customers(self, customers: list[Customer]) -> dict[str, int]:
+        """Upsert customers and return `{customer_id: customer_key}`.
+
+        `ON CONFLICT DO UPDATE`, deliberately not `DO NOTHING`. `DO NOTHING` returns no
+        row when it conflicts, so `RETURNING` yields nothing for every customer that
+        already existed — the map comes back missing keys and the fact load fails on the
+        second run only, which is the worst kind of bug to find. `DO UPDATE` always
+        returns, so the map is always complete.
+
+        Overwrite-on-conflict, no history: no SCD Type 2 (D-014). The surrogate key makes
+        versioning possible later without forcing it now.
+        """
+        keys: dict[str, int] = {}
+        with self.connection.cursor() as cursor:
+            for customer in customers:
+                row = cursor.execute(
+                    "INSERT INTO dim_customers"
+                    " (customer_id, customer_name, region, segment, signup_date)"
+                    " VALUES (%s, %s, %s, %s, %s)"
+                    " ON CONFLICT (customer_id) DO UPDATE"
+                    " SET customer_name = EXCLUDED.customer_name,"
+                    "     region        = EXCLUDED.region,"
+                    "     segment       = EXCLUDED.segment,"
+                    "     signup_date   = EXCLUDED.signup_date,"
+                    "     updated_at    = now()"
+                    " RETURNING customer_key",
+                    (
+                        customer.customer_id,
+                        customer.customer_name,
+                        customer.region,
+                        customer.segment,
+                        customer.signup_date,
+                    ),
+                ).fetchone()
+                keys[customer.customer_id] = row[0]
+
+        logger.info("upserted %d customers", len(keys))
+        return keys
+
+    def upsert_dim_products(self, products: list[Product]) -> dict[str, int]:
+        """Upsert products and return `{product_id: product_key}`. Same contract as customers."""
+        keys: dict[str, int] = {}
+        with self.connection.cursor() as cursor:
+            for product in products:
+                row = cursor.execute(
+                    "INSERT INTO dim_products"
+                    " (product_id, product_name, category, list_price)"
+                    " VALUES (%s, %s, %s, %s)"
+                    " ON CONFLICT (product_id) DO UPDATE"
+                    " SET product_name = EXCLUDED.product_name,"
+                    "     category     = EXCLUDED.category,"
+                    "     list_price   = EXCLUDED.list_price,"
+                    "     updated_at   = now()"
+                    " RETURNING product_key",
+                    (
+                        product.product_id,
+                        product.product_name,
+                        product.category,
+                        product.list_price,
+                    ),
+                ).fetchone()
+                keys[product.product_id] = row[0]
+
+        logger.info("upserted %d products", len(keys))
+        return keys
+
+    # ------------------------------------------------------------------
+    # Staging, facts, rejections
+    # ------------------------------------------------------------------
+
+    def load_staging(self, records: list[ValidSalesRecord], run_id: UUID) -> int:
+        """Insert validated rows into `stg_sales`, keeping natural keys and provenance.
+
+        Staging holds typed valid records, not raw text (SPEC Q5), so §8.2's first
+        reconciliation check can count it directly against `rows_valid`.
+        """
+        rows = [
+            (
+                run_id,
+                record.source_file,
+                record.row_num,
+                record.order_id,
+                record.order_date,
+                record.customer_id,
+                record.product_id,
+                record.quantity,
+                record.unit_price,
+                record.discount_rate,
+            )
+            for record in records
+        ]
+        inserted = self._insert_batched(
+            "INSERT INTO stg_sales (run_id, source_file, row_num, order_id, order_date,"
+            " customer_id, product_id, quantity, unit_price, discount_rate)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            rows,
+        )
+        logger.info("staged %d rows", inserted)
+        return inserted
+
+    def load_facts(
+        self,
+        facts: list[FactSalesRecord],
+        run_id: UUID,
+        customer_keys: dict[str, int],
+        product_keys: dict[str, int],
+    ) -> int:
+        """Insert fact rows, resolving natural keys to surrogates through the two maps.
+
+        A missing key raises rather than inserting NULL or skipping the row. It means the
+        dimensions were not loaded first, which is a programmer error in the orchestrator
+        rather than a data error — and silently dropping facts would make the
+        reconciliation fail with nothing to say why.
+        """
+        rows = []
+        for fact in facts:
+            try:
+                customer_key = customer_keys[fact.customer_id]
+                product_key = product_keys[fact.product_id]
+            except KeyError as error:
+                raise KeyError(
+                    f"row {fact.row_num}: {error.args[0]!r} has no surrogate key. "
+                    f"Dimensions must be upserted before facts (SPEC 7.2)."
+                ) from None
+
+            rows.append(
+                (
+                    fact.order_id,
+                    fact.order_date,
+                    customer_key,
+                    product_key,
+                    fact.quantity,
+                    fact.unit_price,
+                    fact.discount_rate,
+                    fact.gross_sales,
+                    fact.discount_amount,
+                    fact.net_sales,
+                    run_id,
+                )
+            )
+
+        inserted = self._insert_batched(
+            "INSERT INTO fact_sales (order_id, order_date, customer_key, product_key,"
+            " quantity, unit_price, discount_rate, gross_sales, discount_amount,"
+            " net_sales, run_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            rows,
+        )
+        logger.info("loaded %d fact rows", inserted)
+        return inserted
+
+    def load_rejected(self, records: list[RejectedRecord], run_id: UUID) -> int:
+        """Insert quarantined rows, payload as JSONB.
+
+        `Json(...)` wraps the dict so psycopg adapts it to `JSONB` rather than to a text
+        rendering of a Python dict — the latter round-trips as a string and stops being
+        queryable with JSON operators, which is most of the reason for choosing JSONB.
+        """
+        rows = [
+            (
+                run_id,
+                record.source_file,
+                record.row_num,
+                Json(record.raw_payload),
+                record.reason_code,
+                record.reason_detail,
+                record.rejected_at,
+            )
+            for record in records
+        ]
+        inserted = self._insert_batched(
+            "INSERT INTO etl_rejected_sales (run_id, source_file, row_num, raw_payload,"
+            " reason_code, reason_detail, rejected_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            rows,
+        )
+        logger.info("recorded %d rejected rows", inserted)
+        return inserted
+
+    # ------------------------------------------------------------------
+    # Run log
+    # ------------------------------------------------------------------
+
+    def write_run_log(
+        self,
+        result: PipelineResult,
+        *,
+        source_file: str,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> None:
+        """Record the run's outcome in `etl_run_log`.
+
+        Written once at the end with the final status, not as RUNNING then updated. Under
+        §7.4 the whole load is one transaction, so a RUNNING row would never be visible to
+        anyone: it would commit at the same instant as the row superseding it.
+
+        **A consequence worth stating plainly: a FAILED run leaves no log row at all.**
+        The failure rolls back the transaction and the log row is inside it, so this table
+        records successes only. Making failures observable needs a second connection
+        outside this transaction — a decision for the owner, raised in the Step 8b report.
+
+        `source_file`, `started_at` and `finished_at` are parameters because
+        `PipelineResult` carries none of them; it has `duration_seconds` and `dry_run`,
+        for which this table has no columns. A small but real model/table mismatch.
+        """
+        self.connection.execute(
+            "INSERT INTO etl_run_log (run_id, source_file, started_at, finished_at,"
+            " rows_extracted, rows_valid, rows_rejected, rows_loaded, status)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (run_id) DO UPDATE"
+            " SET finished_at    = EXCLUDED.finished_at,"
+            "     rows_extracted = EXCLUDED.rows_extracted,"
+            "     rows_valid     = EXCLUDED.rows_valid,"
+            "     rows_rejected  = EXCLUDED.rows_rejected,"
+            "     rows_loaded    = EXCLUDED.rows_loaded,"
+            "     status         = EXCLUDED.status",
+            (
+                result.run_id,
+                source_file,
+                started_at,
+                finished_at,
+                result.rows_extracted,
+                result.rows_valid,
+                result.rows_rejected,
+                result.rows_loaded,
+                result.status,
+            ),
+        )
+        logger.info("run %s logged as %s", result.run_id, result.status)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _insert_batched(self, sql: str, rows: list[tuple]) -> int:
+        """`executemany` in chunks of `batch_size` (§7.5).
+
+        Chunked rather than one call because a single `executemany` over a very large file
+        builds the whole parameter set before sending anything; chunking bounds that
+        regardless of file size. At 200 rows it makes no measurable difference, which is
+        the point — the shape is already right for the file that eventually arrives with
+        two million.
+        """
+        if not rows:
+            return 0
+
+        total = 0
+        with self.connection.cursor() as cursor:
+            for start in range(0, len(rows), self.batch_size):
+                chunk = rows[start : start + self.batch_size]
+                cursor.executemany(sql, chunk)
+                total += len(chunk)
+        return total
