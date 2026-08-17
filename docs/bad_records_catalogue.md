@@ -87,6 +87,41 @@ Per-code rejection counts, counted by **primary** `reason_code`:
 | `DUPLICATE_ORDER_ID` | 2 | 122, 160 |
 | **Total** | **28** | |
 
+### Expected measure totals — and the three cents (D-024)
+
+The 172 valid rows produce these, to the cent:
+
+| Measure | Total |
+|---|---|
+| `SUM(gross_sales)` | 58328.37 |
+| `SUM(discount_amount)` | 7221.33 |
+| `SUM(net_sales)` | **51107.07** |
+| `SUM(gross) - SUM(discount) - SUM(net)` | **-0.03** ← expected, not a bug |
+
+**Rows 34, 76 and 118 each contribute one cent** to that -0.03. All three are
+`qty=5, price=34.95, rate=0.10`, which produces two exact half-cents at once:
+
+```
+gross        = 174.75            exact
+discount_raw =  17.475  -> 17.48   rounds up
+net_raw      = 157.275  -> 157.28  rounds up
+               17.48 + 157.28 = 174.76,  gross = 174.75,  difference -0.01
+```
+
+Each column is the correctly rounded value of its own exact quantity, which is what
+matters because each is summed independently. Additivity and per-column accuracy
+cannot both survive rounding — that is a property of rounding, not a defect, and
+`Decimal` does not change it (D-024 explains why: `Decimal` fixes binary
+representation error, which is a different problem).
+
+So `-0.03` is the correct answer and the Step 13 reconciliation asserts it as such.
+A predicted non-zero is stronger evidence than a zero: a zero can be produced by two
+errors cancelling or by a check that is not actually running, whereas -0.03 can only
+be produced by the arithmetic being exactly as documented.
+
+The constant belongs to *this dataset*. Regenerating the demo data with different
+prices or rates changes it.
+
 ---
 
 ## 3. Primary-code precedence (D-021)

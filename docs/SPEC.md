@@ -583,6 +583,14 @@ missing file is ambiguous. **Must open with `newline=""`** (§14).
 **PDF anchor:** Step 8 — "Add PostgreSQL Schema"
 `sql/schema.sql` per §5, idempotent (`IF NOT EXISTS`). Built before 7b because a
 loader cannot be tested against tables that do not exist.
+
+**No `CHECK (gross_sales = discount_amount + net_sales)`.** It would reject three
+valid rows (34, 76, 118 — see D-024). Its absence must carry a comment in
+`schema.sql` pointing at D-024, or someone adds it later as an obvious improvement
+and three good rows start failing for a reason nobody remembers. The other `CHECK`
+constraints stay: they duplicate the validator on sign and range, which is D-010's
+point.
+
 **Exit:** applying it twice in a row succeeds; six tables visible in DBeaver.
 **Commit:** `feat: star schema ddl`
 
@@ -633,6 +641,13 @@ Tests land with their own step throughout; this is the closing sweep for anythin
 uncovered. Target: each rejection code fires on its crafted row; golden-row math;
 `discount_rate` boundaries at 0, 0.999, and 1.0; duplicate `order_id`; a rejected
 row's `order_id` not reserving the grain.
+
+**Plus a §3.1 dependency test covering every module, not just `transformers.py`.**
+Step 6 added a source-level guard against `transformers` importing the database layer;
+generalise it so each module is asserted against the one-way diagram. §3.1 is the
+central claim of the walkthrough and should have a test behind it rather than only a
+paragraph — a back-edge is a single added import and the hardest rejection trigger to
+catch by reading a diff.
 **Exit:** `pytest -q` green.
 **Commit:** `test: validator and transformer unit tests`
 
@@ -643,6 +658,12 @@ Project Scenario on p.1, not from Step 13 itself.
 `sql/analytics.sql`, one commented block per business question: revenue by day, top
 products by revenue, revenue by region, highest-lifetime-value customer, rejected
 records by `reason_code`. Plus the `-- RECONCILIATION` block from §8.2.
+
+The reconciliation block also asserts `SUM(gross) - SUM(discount) - SUM(net)`, whose
+expected value is **-0.03**, not zero (D-024) — with a comment saying so and why.
+Demonstrating a predicted non-zero is stronger than demonstrating a zero: a zero can
+come from two errors cancelling or from a check that is not running.
+
 **Exit:** every query returns plausible non-empty results.
 **Commit:** `feat: analytics and reconciliation queries`
 

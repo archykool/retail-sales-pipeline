@@ -468,6 +468,82 @@ will need a migration rather than an edit.
 
 ---
 
+## D-024 — Per-column correctness over additivity; the three cents are by design
+
+**Status:** Accepted
+
+**Context.** §7.1 computes three measures from each valid row and rounds each once, at
+the end, to two decimal places:
+
+```
+gross_sales     = quantity * unit_price
+discount_amount = gross_sales * discount_rate
+net_sales       = gross_sales - discount_amount
+```
+
+Three rows in the committed dataset — 34, 76 and 118, all `qty=5, price=34.95,
+rate=0.10` — produce two exact half-cents at once:
+
+```
+gross        = 174.75            exact
+discount_raw =  17.475  -> 17.48   half-cent, rounds up
+net_raw      = 157.275  -> 157.28  half-cent, rounds up
+               17.48 + 157.28 = 174.76, but gross is 174.75
+```
+
+Each row is off by one cent, so across the dataset
+`SUM(gross) - SUM(discount) - SUM(net) = -0.03`.
+
+**This is not what `Decimal` was for, and `Decimal` does not fix it.** D-006 chose
+`Decimal` over `float` to eliminate *binary representation* error — the reason
+`0.1 + 0.2 != 0.3` in float arithmetic. That problem is solved completely and
+permanently: `Decimal("0.1")` is exactly one tenth.
+
+Rounding is a different problem with no clean fix. Quantizing to two places maps
+infinitely many exact values onto a grid of cents, and that map cannot preserve both
+per-value accuracy and additivity. Given `a = b + c` exactly, `round(b) + round(c)`
+need not equal `round(a)`. No numeric type changes this; it is arithmetic, not
+representation. Conflating the two is easy and leads to hunting for a bug that is not
+there.
+
+**Options.**
+1. **Round each measure independently** — each column is the correctly rounded value
+   of its own exact quantity; the additive identity can be off by a cent per row.
+2. **Derive `net = round(gross) - round(discount)`** — identity always holds. Row 34's
+   `net_sales` becomes 157.27 when the exact value is 157.275. Also contradicts §7.1
+   explicitly.
+3. **Make `net_sales` a generated column in SQL** — identity by construction, changes
+   §5 and moves a business rule into the DDL.
+
+**Decision.** Option 1. The three columns are aggregated independently — `SUM(net_sales)`
+is the revenue figure, `SUM(discount_amount)` answers "what did discounting cost us" —
+so each must be the correctly rounded value of its own exact quantity. Option 2
+corrupts the number everyone queries to repair an identity nobody queries.
+
+**Consequences.**
+
+- `SUM(gross) - SUM(discount) - SUM(net) = -0.03` for this dataset, contributed by rows
+  34, 76 and 118 at one cent each. Recorded as a number in
+  `docs/bad_records_catalogue.md` §2, not merely as a principle — a known discrepancy
+  is a design property, an unrecorded one is an open bug, and the only difference
+  between them is whether it is written down.
+- **No `CHECK (gross_sales = discount_amount + net_sales)` in `schema.sql`.** It would
+  reject three valid rows. Its absence is marked with a comment pointing here, because
+  otherwise someone adds it later as an obvious improvement and three good rows start
+  failing for a reason nobody remembers.
+- The Step 13 `-- RECONCILIATION` block asserts this identity equals **-0.03**, not
+  zero. Demonstrating a predicted non-zero is stronger evidence than demonstrating a
+  zero: a zero can come from two errors cancelling, or from a check that silently is
+  not running. A specific predicted non-zero can only come from the arithmetic being
+  exactly as documented.
+- If the dataset is ever regenerated with different prices or rates, the constant
+  changes. It is a property of this data, not of the code, and the reconciliation
+  comment says so.
+
+**Say on camera.**
+
+---
+
 ## Open questions (Q2 and Q3 resolve before Step 5; Q4 and Q5 before Step 8)
 
 | # | Question | Leaning |
