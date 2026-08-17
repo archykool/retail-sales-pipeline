@@ -26,6 +26,29 @@ human owner wins over everything.
   not dictated by the spec gets appended to `docs/DECISION.md` **in the owner's
   own words** — the agent does not write those rationales.
 
+### Design-choice reporting format
+
+After each file, the agent reports decisions in **two separate lists:**
+
+**A. SPEC DEVIATIONS** — spec says X; I implemented Y instead; here's why.
+(Example: SPEC says "with sane defaults for all DB settings" but I made them
+all required. Reason: production containers won't have a .env file, so failing
+loudly at startup catches misconfigurations that silently wrong defaults would hide.)
+
+**B. UNSPECIFIED** — spec was silent on this; I chose Y; here's why.
+(Example: I made `from_env()` read `os.environ` only, not calling `load_dotenv()`
+internally. Reason: main.py owns calling `load_dotenv()` at startup, keeping the
+same code path for dev and prod.)
+
+**Only report items where there was a real alternative.** Spec compliance is not
+a design choice. If a choice is ordinary good practice (use immutable dataclasses,
+use `pathlib.Path`, mask passwords), don't report it unless the spec was genuinely
+silent *and* a real alternative exists. ADR threshold: "I chose Y over Z because..."
+If the list is noisy, important deviations get buried.
+
+Only the owner appends these to DECISION.md, in their own words after reviewing
+the code.
+
 ---
 
 ## Dependency rule (SPEC §3.1) — the single most important structural claim
