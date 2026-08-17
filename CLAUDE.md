@@ -9,7 +9,10 @@ human owner wins over everything.
 
 ## How we work (SPEC §13)
 
-- **One step at a time, Step 0 → Step 15.** Each step is exactly **one commit**.
+- **One step at a time, in the order §9 lists them.** Each step is exactly **one
+  commit**. Step labels are the assignment PDF's own numbers, so they are *not*
+  sequential in build order — see the two-way map in SPEC §9.0 and never renumber
+  a step without being asked.
 - **Do not start step N+1 until the owner explicitly says so.** Wait for go-ahead.
 - **Do not modify files outside the current step's scope.**
 - **Do not add dependencies** that aren't already in `requirements.txt`.

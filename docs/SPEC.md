@@ -1,11 +1,17 @@
 # SPEC.md — Object-Oriented Sales Data Pipeline
 
 **Owner:** Archy
-**Status:** v2 (revised after agent review — step numbering realigned to the assignment PDF; extractor/transformer boundary corrected)
+**Status:** v3 (step numbering verified against the PDF page by page, not inferred)
 **Purpose:** Single source of truth handed to a coding agent. If the agent and this file disagree, this file wins. If this file and the assignment PDF disagree, **flag it — do not resolve it silently**.
 
+**Changes from v2:**
+- **§9 renumbered against the actual PDF.** v2's anchors were inference — six were marked ⚠ and never checked. Two were wrong: Docker Compose is PDF Step 9 (not 1), and the PDF has **no configuration step at all** (`PipelineConfig` appears only in its class-responsibility table on p.2). §9.0 is a full two-way step map.
+- §9 now runs in **build order** with PDF-true labels, because the PDF's own order is not buildable — it puts Docker at Step 9, after the loader.
+- PDF Step 7 covers both loader classes; split into `7a`/`7b` for reviewability, same anchor.
+- `main.py`/CLI is `Step 10+` and tests are `Step 12+` — the PDF asks for neither, and its Step 12 is a verification step, not a test step.
+- Every ⚠ removed: anchors now cite the PDF's printed titles.
+
 **Changes from v1:**
-- Step numbers now mirror the assignment PDF 1:1. Additions are suffixed `+`.
 - §4 / Step 4 / Step 6 corrected: `JSONExtractor` returns raw dicts; the **transformer** builds `Customer` / `Product` objects (see D-016).
 - New §7.0 pipeline execution order — the transformer runs twice.
 - New §14 Windows notes.
@@ -26,7 +32,7 @@ A batch ETL pipeline that reads daily retail sales files (CSV + JSON reference d
 | Requirement | Design consequence |
 |---|---|
 | Explain features per file + how files interact | One responsibility per file, no cross-imports except through defined interfaces. Import direction must be a straight line. |
-| Cover all features in the assignment doc | Step numbers match the PDF (§9). Traceability matrix in §10. |
+| Cover all features in the assignment doc | Step labels are the PDF's own, verified against it (§9.0 maps both ways); additions carry `+`. Traceability matrix in §10. |
 | Explain *key design decisions*, not every line | Decisions live in `DECISION.md`, each with a one-sentence spoken version. |
 | 10 minutes total | ~90 seconds per architectural layer. If a file needs more than 90 seconds to explain, it is doing too much. |
 
@@ -398,120 +404,234 @@ Put these in `sql/analytics.sql` under `-- RECONCILIATION` and run them on camer
 
 ## 9. Implementation plan
 
-**Step numbers mirror the assignment PDF.** Steps marked `+` are additions with no PDF counterpart. The PDF has no Step 11; that slot is filled by CLI + logging, which is where it belongs anyway.
+**Step numbers are the PDF's own**, verified line by line against
+`docs/Student_Project_Instructions.pdf` on 2026-08-17. Every step below carries its
+PDF anchor. Steps suffixed `+` are additions the PDF never asks for; they are
+labelled with the PDF step they follow so the numbering never drifts from the
+assignment again. Where the PDF groups two classes into one step and we split it
+for reviewability, both halves keep the same PDF number (`7a`, `7b`).
 
-Each step is ONE commit. Do not start the next step until the current one's exit criteria pass and I approve.
+**The PDF's numbering is a contract, not a build order.** It puts Docker Compose at
+Step 9, after the loader at Steps 7–8 — you can write a loader before a database
+exists, but you cannot *test* one. §9 therefore runs in **build order** while
+keeping PDF-true labels. The map in §9.0 reads both ways. Saying that distinction
+out loud is worth 15 seconds: it shows the assignment was read as a specification
+rather than a checklist.
 
-> **Agent task before Step 0:** verify the "PDF anchor" line on every step below against the actual PDF. Anchors marked ⚠ are inferred, not confirmed. Report any mismatch as a table; do not silently renumber.
+Each step is ONE commit. Do not start the next step until the current one's exit
+criteria pass and I approve.
 
 ---
 
-### Step 0+ — Repo skeleton
-**PDF anchor:** none (addition)
-Folders per §3; `.gitignore` (`.env`, `data/rejected/*`, `!data/rejected/.gitkeep`, `__pycache__`, `venv/`, `*.pyc`); `.gitattributes` (`* text=auto eol=lf`); `.env.example`; `requirements.txt` (`psycopg[binary]`, `python-dotenv`, `pytest`); empty `__init__.py`; README stub; move SPEC/DECISION/PDF into `docs/`.
+### 9.0 Step map
+
+Ordered by PDF step, so this column can be walked against the assignment directly.
+
+| PDF step | PDF title | Our step | Delivers | Built | Status |
+|---|---|---|---|---|---|
+| 1 | Create the Project Structure | **Step 1** | folders, `.gitignore`, `.gitattributes`, `.env.example`, `requirements.txt`, README stub | 1st | done |
+| — | *(no step; `PipelineConfig` is named in the PDF's class table, p.2)* | **Step 1+** | `src/config.py` | 3rd | done |
+| 2 | Add Demo Input Data | **Step 2** | `data/raw/` ×3, plus catalogue and generator (**both additions**) | 5th | done |
+| 3 | Define Data Models *(marked OPTIONAL)* | **Step 3** | `src/models.py` | 4th | done |
+| 4 | Build Extractor Classes | **Step 4** | `src/extractors.py` | 6th | done |
+| 5 | Build the Validator | **Step 5** | `src/validators.py` | 7th | **next** |
+| 6 | Build the Transformer | **Step 6** | `src/transformers.py` | 8th | pending |
+| 7 | Build the Loader | **Step 7a** | `RejectedRecordWriter` | 9th | pending |
+| 8 | Add PostgreSQL Schema | **Step 8** | `sql/schema.sql` | 10th | pending |
+| 7 | Build the Loader *(second half)* | **Step 7b** | `DatabaseConnection`, `PostgresLoader` | 11th | pending |
+| 9 | Add Docker Compose for PostgreSQL | **Step 9** | `docker-compose.yml`, `docker/initdb/` | 2nd | done |
+| 10 | Build the Pipeline Orchestrator | **Step 10** | `src/pipeline.py` | 12th | pending |
+| 11 | **absent from the PDF** | **Step 10+** | `main.py`, argparse, logging | 13th | pending |
+| 12 | Run the Full Project | **Step 12** | end-to-end run, six tables, idempotency proof | 14th | pending |
+| — | *(no step; the PDF never asks for tests)* | **Step 12+** | `tests/` sweep for validator and transformer | 15th | pending |
+| 13 | Run Analytics Queries | **Step 13** | `sql/analytics.sql` | 16th | pending |
+
+Three things this table makes visible, all worth saying on camera:
+
+- **Two commits landed under labels that were wrong.** Docker was committed as
+  "Step 1" when it is PDF Step 9; config was committed as "Step 2" when the PDF has
+  no configuration step at all. The commit messages stand; the README carries the
+  corrected mapping.
+- **Tests are not a PDF requirement.** They exist because the catalogue needs an
+  executable oracle, and they land with each step rather than all at Step 12+.
+- **`PipelineConfig` is required, but not by a step.** It appears only in the PDF's
+  class-responsibility table, which is the closest thing the assignment has to a
+  file-by-file contract and is worth reading as one.
+
+---
+
+### Step 1 — Project structure
+**PDF anchor:** Step 1 — "Create the Project Structure"
+Folders per §3. **Additions beyond the PDF's tree:** `.gitignore` (`.env`,
+`data/rejected/*`, `!data/rejected/.gitkeep`, `__pycache__`, `venv/`, `*.pyc`),
+`.gitattributes` (`* text=auto eol=lf`), `.env.example`, `CLAUDE.md`, empty
+`__init__.py` files, and moving SPEC/DECISION/PDF into `docs/`. The PDF's tree
+names only `docker-compose.yml`, `main.py`, and `requirements.txt` at root.
 **Exit:** `pip install -r requirements.txt` succeeds; `git status` clean.
-**Commit:** `chore: project skeleton and dependencies`
+**Commit:** `chore: project skeleton and dependencies` ✅
 
-### Step 1 — PostgreSQL via Docker Compose ⚠
-**PDF anchor:** Step 1
-`docker-compose.yml`: postgres:16, named volume, port 5432, env-var credentials, healthcheck, `./docker/initdb` mounted to `/docker-entrypoint-initdb.d`. Init script creates `sales_dev` and `sales_prod`.
+### Step 9 — PostgreSQL via Docker Compose
+**PDF anchor:** Step 9 — "Add Docker Compose for PostgreSQL/ or Build in your local machine"
+Built second, not ninth: everything downstream needs a database to test against.
+`docker-compose.yml`: postgres:16, named volume, port 5432, env-var credentials,
+healthcheck, `./docker/initdb` mounted to `/docker-entrypoint-initdb.d`. Init script
+creates `sales_dev` and `sales_prod`. **Deviation:** the PDF hardcodes host, port,
+database, user, and password as literal example values; ours come from the
+environment (D-007).
 **Exit:** `docker compose up -d`; connect from DBeaver; `\l` lists both databases.
-**Commit:** `feat: postgres via docker compose with dev and prod databases`
+**Commit:** `feat: postgres via docker compose with dev and prod databases` ✅
 
-### Step 2 — Configuration ⚠
-**PDF anchor:** Step 2
-`src/config.py`. `PipelineConfig.from_env()`. Every path and DB setting from env with sane defaults. Fails loudly at startup with a readable message, not a `KeyError` mid-run. `__repr__` masks the password.
-**Exit:** `python -c "from src.config import PipelineConfig; print(PipelineConfig.from_env())"` prints config with password masked.
-**Commit:** `feat: environment-driven pipeline config`
+### Step 1+ — Environment-driven configuration
+**PDF anchor:** none. The PDF has no configuration step; `PipelineConfig` is named
+only in its class-responsibility table (p.2), with the responsibility "Reads file
+paths and database settings from environment variables."
+`src/config.py`. `PipelineConfig.from_env()` reads `os.environ` only — loading
+`.env` belongs to the entry point (D-018). **Deviation:** DB settings are required
+rather than defaulted, so a missing value fails at startup instead of silently
+pointing at the wrong database. `__repr__` masks the password.
+**Exit:** `python -c "from dotenv import load_dotenv; load_dotenv(); from src.config import PipelineConfig; print(PipelineConfig.from_env())"` prints config with the password masked.
+**Commit:** `feat: environment-driven pipeline config` ✅
 
 ### Step 3 — Data models
-**PDF anchor:** Step 3 (marked optional in the PDF — we are doing it; see D-003)
+**PDF anchor:** Step 3 — "Define Data Models", **marked OPTIONAL**. We are doing it
+anyway; see D-003 for why the optional step is worth the most.
 `src/models.py` per §4. No logic beyond `__post_init__` coercion helpers.
 **Exit:** `pytest -q` green — all seven models frozen, no field defaulted.
-**Commit:** `feat: dataclass data contract`
+**Commit:** `feat: dataclass data contract` ✅
 
-### Step 3+ — Bad-record catalogue and demo data
-**PDF anchor:** none (addition)
-**Runs BEFORE Step 4.** Step 4's exit criteria require these files to exist.
+### Step 2 — Demo input data, and the catalogue that specifies it
+**PDF anchor:** Step 2 — "Add Demo Input Data". The PDF asks only for the three
+files, written by hand, with some bad rows and "Please Come up with more edge
+cases". It asks for **neither** a generator script **nor** a defect catalogue.
+Both are ours.
 
 Two artifacts, written in this order:
 
-1. `docs/bad_records_catalogue.md` — the oracle. One row per planted defect
-   with `row_num`, the defect, and the expected `reason_code`. Includes the
-   precedence rules that decide the primary code when a row breaks several
-   rules at once (D-021).
-2. `scripts/generate_demo_data.py` — implements the catalogue. ~200 sales
-   rows, 20 customers, 15 products.
+1. `docs/bad_records_catalogue.md` — the oracle. One row per planted defect with
+   `row_num`, the defect, and the expected `reason_code`. Includes the precedence
+   rules that decide the primary code when a row breaks several rules at once (D-021).
+2. `scripts/generate_demo_data.py` — implements the catalogue. 200 sales rows,
+   20 customers, 15 products.
 
 **Catalogue first, generator second, and both before the validator.** If the
-generator is written first the catalogue becomes a transcript of its output
-and can no longer disagree with it. Written first, the catalogue is a
-specification the generator implements — and the disagreements are the
-signal. See D-012.
+generator is written first the catalogue becomes a transcript of its output and can
+no longer disagree with it. Written first, the catalogue is a specification the
+generator implements — and the disagreements are the signal. See D-012.
 
-**Exit:** three files in `data/raw/`; catalogue covers every row-scoped code
-in §6 (`SCHEMA_MISMATCH` is file-scoped and is exercised by an extractor
-test fixture in Step 4, not planted in the data).
-**Commit:** `feat: bad-record catalogue and synthetic demo data`
+Built fifth rather than second because the catalogue's row numbers are quoted by the
+extractor tests, so it only had to precede Step 4, not Step 3.
+
+**Exit:** three files in `data/raw/`; catalogue covers every row-scoped code in §6
+(`SCHEMA_MISMATCH` is file-scoped and is exercised by an extractor test fixture in
+Step 4, not planted in the data).
+**Commit:** `feat: bad-record catalogue and synthetic demo data` ✅
 
 ### Step 4 — Extractors
-**PDF anchor:** Step 4
-`src/extractors.py`. `Extractor(ABC)` with `@abstractmethod extract()`. `CSVExtractor` → `list[RawSalesRecord]` (validates header, `row_num` starts at 2 to match Excel, `encoding="utf-8-sig"` for BOM). `JSONExtractor` → `list[dict]`, **raw, no domain objects** (D-016).
-**Exit:** correct counts for all three files; a corrupted header raises `SchemaMismatchError` — exercised by a `tmp_path` header fixture in the extractor tests, not by a committed data file (see §3+).
-**Commit:** `feat: abstract extractor with CSV and JSON implementations`
+**PDF anchor:** Step 4 — "Build Extractor Classes". OOP concept the PDF names here:
+ABSTRACTION.
+`src/extractors.py`. `Extractor(ABC)` with `@abstractmethod extract()`.
+`CSVExtractor` → `list[RawSalesRecord]` (validates header, `row_num` from the
+physical line so blank lines cannot renumber rows, `encoding="utf-8-sig"` for BOM).
+`JSONExtractor` → `list[dict]`, **raw, no domain objects** (D-016).
+**Exit:** correct counts for all three files; a corrupted header raises
+`SchemaMismatchError` — exercised by a `tmp_path` header fixture in the extractor
+tests, not by a committed data file (see Step 2).
+**Commit:** `feat: abstract extractor with CSV and JSON implementations` ✅
 
 ### Step 5 — Validator
-**PDF anchor:** Step 5
-`src/validators.py`. Constructor takes `set[customer_id]` and `set[product_id]`. All rules from §6. One private method per rule family — `_check_types`, `_check_ranges`, `_check_foreign_keys`, `_check_duplicates` — so `validate()` reads like a table of contents.
-**Exit:** valid/rejected counts match `bad_records_catalogue.md` **exactly**, including which code fired on which row.
+**PDF anchor:** Step 5 — "Build the Validator". The PDF lists nine checks and then
+asks for "More edge case we should validate"; §6.2 is that answer.
+`src/validators.py`. Constructor takes `set[customer_id]` and `set[product_id]`. All
+rules from §6, with the D-021 precedence tiers deciding the primary code. One
+private method per rule family — `_check_types`, `_check_ranges`,
+`_check_foreign_keys`, `_check_duplicates` — so `validate()` reads like a table of
+contents.
+**Exit:** valid/rejected counts match `bad_records_catalogue.md` **exactly**
+(172/28), including which code fired on which row.
 **Commit:** `feat: record-level validator with typed rejection reasons`
 
 ### Step 6 — Transformers
-**PDF anchor:** Step 6
-`src/transformers.py`. `ReferenceDataTransformer`: `list[dict]` → `list[Customer]` / `list[Product]`, and exposes the ID sets the validator needs. `SalesDataTransformer`: `ValidSalesRecord` → `FactSalesRecord` with §7.1 math.
+**PDF anchor:** Step 6 — "Build the Transformer". The PDF explicitly puts
+`Customer`/`Product` construction here, which is what corrected our v1 design (D-016).
+`src/transformers.py`. `ReferenceDataTransformer`: `list[dict]` → `list[Customer]` /
+`list[Product]`, and exposes the ID sets the validator needs. `SalesDataTransformer`:
+`ValidSalesRecord` → `FactSalesRecord` with §7.1 math.
 **Exit:** the three golden rows from §8.2 pass; ID sets non-empty and correctly sized.
 **Commit:** `feat: reference and sales transformers`
 
-### Step 7 — Rejected-record writer ⚠
-**PDF anchor:** Step 7
-`RejectedRecordWriter` in `src/loaders.py`. CSV output, timestamped filename, **header always written even with zero rejects** — an empty file is a signal, a missing file is ambiguous.
-**Must open with `newline=""`** (§14).
+### Step 7a — Rejected-record writer
+**PDF anchor:** Step 7 — "Build the Loader" (first of the two classes it lists).
+Split from 7b because it needs no database, and it completes the dry-run path.
+`RejectedRecordWriter` in `src/loaders.py`. CSV output, timestamped filename,
+**header always written even with zero rejects** — an empty file is a signal, a
+missing file is ambiguous. **Must open with `newline=""`** (§14).
 **Exit:** rejected CSV opens cleanly in Excel with no blank rows between records.
 **Commit:** `feat: rejected-record csv writer`
 
-### Step 8 — Schema DDL and database loader
-**PDF anchor:** Step 8
-`sql/schema.sql` per §5, idempotent. `DatabaseConnection` context manager. `PostgresLoader` with `create_tables`, `load_staging`, `upsert_dim_customers`, `upsert_dim_products`, `load_facts`, `load_rejected`, `write_run_log`.
-**Exit:** applying DDL twice succeeds; loading by hand from a REPL populates all six tables; the §8.2 reconciliation balances.
-**Commit:** `feat: star schema ddl and postgres loader`
+### Step 8 — Schema DDL
+**PDF anchor:** Step 8 — "Add PostgreSQL Schema"
+`sql/schema.sql` per §5, idempotent (`IF NOT EXISTS`). Built before 7b because a
+loader cannot be tested against tables that do not exist.
+**Exit:** applying it twice in a row succeeds; six tables visible in DBeaver.
+**Commit:** `feat: star schema ddl`
 
-### Step 9 — Orchestrator ⚠
-**PDF anchor:** Step 9
-`src/pipeline.py`. `SalesPipeline.run() -> PipelineResult`. Generates a `run_id` (UUID4), sequences §7.0, logs each stage with counts and elapsed time, honours `dry_run`. **No business logic here** — it coordinates, it does not compute.
+### Step 7b — Database connection and Postgres loader
+**PDF anchor:** Step 7 — "Build the Loader" (second of the two classes it lists).
+`DatabaseConnection` context manager (§7.4). `PostgresLoader` with `create_tables`,
+`load_staging`, `upsert_dim_customers`, `upsert_dim_products`, `load_facts`,
+`load_rejected`, `write_run_log`. Surrogate-key resolution happens here, never in
+the transformer — that would require a DB connection in `transformers.py` and break
+§3.1.
+**Exit:** loading by hand from a REPL populates all six tables; the §8.2
+reconciliation balances.
+**Commit:** `feat: database connection and postgres loader`
+
+### Step 10 — Orchestrator
+**PDF anchor:** Step 10 — "Build the Pipeline Orchestrator(auto ingest)". Dry-run
+mode is named by the PDF here, not invented by us.
+`src/pipeline.py`. `SalesPipeline.run() -> PipelineResult`. Generates a `run_id`
+(UUID4), sequences §7.0, logs each stage with counts and elapsed time, honours
+`dry_run`. **No business logic here** — it coordinates, it does not compute.
 **Exit:** dry-run produces a full summary with zero DB writes; real run loads everything.
 **Commit:** `feat: sales pipeline orchestrator with dry-run mode`
 
-### Step 10 — Entry point ⚠
-**PDF anchor:** Step 10
-`main.py`. Wires config → pipeline → result. Nothing else lives here.
-**Exit:** `python main.py` completes end to end.
-**Commit:** `feat: main entry point`
-
-### Step 11+ — CLI arguments and logging
-**PDF anchor:** none — **the PDF skips from Step 10 to Step 12.** This fills the gap.
-argparse (`--dry-run`, `--file`, `--log-level`); exit code 0 on success, 1 on failure. `logging` module throughout; **never `print` inside `src/`**.
+### Step 10+ — Entry point, CLI, and logging
+**PDF anchor:** none. **The PDF has no Step 11** — it goes from Step 10 straight to
+Step 12 — and it never names `main.py` as a step, though its Step 1 tree includes
+the file and its Step 12 assumes something runnable exists.
+`main.py`: calls `load_dotenv()` (D-018), wires config → pipeline → result, nothing
+else. argparse (`--dry-run`, `--file`, `--log-level`); exit code 0 on success, 1 on
+failure. `logging` throughout; **never `print` inside `src/`**.
 **Exit:** pointing at a nonexistent file returns exit code 1 (PowerShell: `$LASTEXITCODE`).
-**Commit:** `feat: cli arguments and structured logging`
+**Commit:** `feat: cli entry point and structured logging`
 
-### Step 12 — Tests ⚠
-**PDF anchor:** Step 12
-`tests/`. Cover: each rejection code fires exactly once on a crafted row; golden-row math; `discount_rate` boundaries at 0, 0.999, 1.0; duplicate `order_id`. ~15 focused tests, not coverage percentage.
+### Step 12 — Run the full project
+**PDF anchor:** Step 12 — "Run the Full Project". The PDF's content here is a list of
+expected tables in DBeaver, so this is a verification step, not a coding one.
+Full run against `sales_dev`, then the idempotency proof: run twice, confirm
+`SELECT SUM(net_sales) FROM fact_sales` is identical. Capture the transcript for the
+README.
+**Exit:** all six tables populated; `SUM(net_sales)` unchanged across two runs.
+**Commit:** `docs: end-to-end run and idempotency evidence`
+
+### Step 12+ — Test sweep
+**PDF anchor:** none. The PDF never asks for tests. They exist because the catalogue
+needs an executable oracle (D-012) and because frozen-ness and money math are
+invariants worth pinning.
+Tests land with their own step throughout; this is the closing sweep for anything
+uncovered. Target: each rejection code fires on its crafted row; golden-row math;
+`discount_rate` boundaries at 0, 0.999, and 1.0; duplicate `order_id`; a rejected
+row's `order_id` not reserving the grain.
 **Exit:** `pytest -q` green.
 **Commit:** `test: validator and transformer unit tests`
 
 ### Step 13 — Analytics and reconciliation SQL
-**PDF anchor:** Step 13
-`sql/analytics.sql`, one commented block per business question: revenue by day, top products by revenue, revenue by region, highest-lifetime-value customer, rejected records by `reason_code`. Plus the `-- RECONCILIATION` block from §8.2.
+**PDF anchor:** Step 13 — "Run Analytics Queries", whose only instruction is "should
+verify: if the data is correct". The five business questions come from the PDF's
+Project Scenario on p.1, not from Step 13 itself.
+`sql/analytics.sql`, one commented block per business question: revenue by day, top
+products by revenue, revenue by region, highest-lifetime-value customer, rejected
+records by `reason_code`. Plus the `-- RECONCILIATION` block from §8.2.
 **Exit:** every query returns plausible non-empty results.
 **Commit:** `feat: analytics and reconciliation queries`
 
@@ -527,17 +647,17 @@ argparse (`--dry-run`, `--file`, `--log-level`); exit code 0 on success, 1 on fa
 | R4 | Validate + capture rejects | 5 | `SalesDataValidator` | Step 5, catalogue match |
 | R5 | Build Customer/Product objects | 6 | `ReferenceDataTransformer` | Step 6 |
 | R6 | Compute sales measures | 6 | `SalesDataTransformer` | §7.1, tests |
-| R7 | Rejected CSV output | 7 | `RejectedRecordWriter` | Step 7 |
-| R8 | Load staging/dim/fact | 8 | `PostgresLoader` | Step 8, §8.2 |
-| R9 | Connection lifecycle | 8 | `DatabaseConnection` | §7.4 |
+| R7 | Rejected CSV output | 7 | `RejectedRecordWriter` | Step 7a |
+| R8 | Load staging/dim/fact | 7 | `PostgresLoader` | Step 7b, §8.2 |
+| R9 | Connection lifecycle | 7 | `DatabaseConnection` | §7.4 |
 | R10 | Star schema justified | 8 | `sql/schema.sql`, D-005 | Step 8 |
-| R11 | Orchestrator coordinates only | 9 | `SalesPipeline` | Step 9 |
-| R12 | Docker Compose Postgres | 1 | `docker-compose.yml` | Step 1 |
-| R13 | Config from env vars | 2 | `PipelineConfig` | Step 2 |
-| R14 | Dataclass models | 3 | `src/models.py` | Step 3 |
+| R11 | Orchestrator coordinates only | 10 | `SalesPipeline` | Step 10 |
+| R12 | Docker Compose Postgres | 9 | `docker-compose.yml` | Step 9 |
+| R13 | Config from env vars | — *(class table, p.2)* | `PipelineConfig` | Step 1+ |
+| R14 | Dataclass models | 3 *(optional)* | `src/models.py` | Step 3 |
 | R15 | Abstraction (ABC) | 4 | `Extractor` | Step 4 |
-| R16 | Extra edge cases | 5 | §6.2 | Step 3+, Step 5 |
-| R17 | Pre-load verification | checkpoint | dry-run, §8.1 | Step 9 |
+| R16 | Extra edge cases | 5 | §6.2 | Step 2, Step 5 |
+| R17 | Pre-load verification | checkpoint + 10 | dry-run, §8.1 | Step 10 |
 | R18 | "How do you know it's correct" | checkpoint | §8.2 | Step 13 |
 | R19 | Revenue per day | 13 | `analytics.sql` Q1 | Step 13 |
 | R20 | Top products by revenue | 13 | Q2 | Step 13 |
@@ -551,7 +671,7 @@ Walk this table top to bottom before recording. Any unverified row is a hole an 
 
 ## 11. Video run sheet (10:00)
 
-Not a build step — read it **before** Step 0. Knowing how long each file gets on camera changes how you write it. A file needing three minutes to explain is a file that should be split.
+Not a build step — read it **before** Step 1. Knowing how long each file gets on camera changes how you write it. A file needing three minutes to explain is a file that should be split.
 
 | Time | Segment | Show on screen |
 |---|---|---|
@@ -622,7 +742,7 @@ Developed on Windows, graded elsewhere. These are real, not theoretical.
 | Issue | Requirement |
 |---|---|
 | CSV blank lines | Always `open(path, "w", newline="", encoding="utf-8")`. Without `newline=""`, `csv.writer` emits `\r\r\n` on Windows and every record is followed by a blank row. |
-| Line endings in git | `.gitattributes` with `* text=auto eol=lf`. Committed in Step 0+. |
+| Line endings in git | `.gitattributes` with `* text=auto eol=lf`. Committed in Step 1. |
 | Exit codes | Bash `echo $?` → PowerShell `$LASTEXITCODE`, cmd `%ERRORLEVEL%`. |
 | Paths | `pathlib.Path` everywhere. No string concatenation, no hardcoded `\` or `/`. |
 | Virtualenv | `python -m venv venv` then `venv\Scripts\activate`. |

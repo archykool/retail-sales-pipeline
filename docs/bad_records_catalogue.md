@@ -174,8 +174,8 @@ The related edge — *does a rejected row's `order_id` enter the seen-set?* —
 answers **no**: only rows that pass validation reserve an `order_id`, because the
 grain being protected is what actually lands in `fact_sales`, and a row rejected
 for a bad price never occupies it. That case is deliberately **not** planted here
-(it would make the counts above ambiguous); it is asserted directly in the Step
-12 unit tests instead.
+(it would make the counts above ambiguous); it is asserted directly in the
+validator's unit tests at Step 5 instead.
 
 ---
 

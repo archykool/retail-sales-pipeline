@@ -367,7 +367,7 @@ even though it is not the count of *failed checks*.
 
 ---
 
-## Open questions (resolve before Step 3+)
+## Open questions (Q2 and Q3 resolve before Step 5; Q4 and Q5 before Step 8)
 
 | # | Question | Leaning |
 |---|---|---|
