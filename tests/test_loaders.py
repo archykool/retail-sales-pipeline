@@ -269,3 +269,154 @@ def test_writes_the_real_twenty_eight_rejections(tmp_path: Path) -> None:
         77, 81, 86, 90, 95, 99, 104, 108, 113, 117, 122, 160,
     }
     assert all(json.loads(row["raw_payload"]) for row in rows)
+
+
+# ======================================================================
+# FactPreviewWriter (Step 7b)
+# ======================================================================
+
+
+def make_fact(**overrides):
+    from datetime import date
+
+    from src.models import FactSalesRecord
+
+    fields = {
+        "row_num": 40,
+        "source_file": "sales_2026_01.csv",
+        "order_id": 1038,
+        "order_date": date(2026, 1, 15),
+        "customer_id": "C019",
+        "product_id": "P009",
+        "quantity": 4,
+        "unit_price": Decimal("25.00"),
+        "discount_rate": Decimal("0.10"),
+        "gross_sales": Decimal("100.00"),
+        "discount_amount": Decimal("10.00"),
+        "net_sales": Decimal("90.00"),
+    }
+    fields.update(overrides)
+    return FactSalesRecord(**fields)
+
+
+def test_preview_leading_columns_mirror_fact_sales_declared_order(tmp_path: Path) -> None:
+    """The first ten columns must match §5's fact_sales order for a side-by-side read.
+
+    Surrogate keys are substituted for natural ones because FactSalesRecord carries
+    natural keys by design (§7.2); provenance trails at the end so it does not disturb
+    the alignment.
+    """
+    from src.loaders import FactPreviewWriter
+
+    path = FactPreviewWriter(tmp_path).write([make_fact()])
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        header = next(csv.reader(handle))
+
+    assert header[:10] == [
+        "order_id", "order_date", "customer_id", "product_id", "quantity",
+        "unit_price", "discount_rate", "gross_sales", "discount_amount", "net_sales",
+    ]
+    assert header[10:] == ["row_num", "source_file"]
+    assert "customer_key" not in header
+    assert "product_key" not in header
+
+
+def test_preview_uses_the_fixed_filename_from_section_8_1(tmp_path: Path) -> None:
+    from src.loaders import FactPreviewWriter
+
+    assert FactPreviewWriter(tmp_path).write([]).name == "preview_fact_sales.csv"
+
+
+def test_preview_overwrites_rather_than_accumulating(tmp_path: Path) -> None:
+    """A stale preview beside a current one is a way to read the wrong numbers.
+
+    This is the opposite of RejectedRecordWriter's behaviour, and matches §7.3: the
+    database keeps the latest run, not an accumulation.
+    """
+    from src.loaders import FactPreviewWriter
+
+    writer = FactPreviewWriter(tmp_path)
+    first = writer.write([make_fact(order_id=1), make_fact(order_id=2)])
+    second = writer.write([make_fact(order_id=3)])
+
+    assert first == second
+    assert len(list(tmp_path.glob("preview_fact_sales*.csv"))) == 1
+    rows = read_rows(second)
+    assert [row["order_id"] for row in rows] == ["3"]
+
+
+def test_preview_header_written_with_zero_facts(tmp_path: Path) -> None:
+    from src.loaders import FACT_PREVIEW_COLUMNS, FactPreviewWriter
+
+    path = FactPreviewWriter(tmp_path).write([])
+
+    assert path.read_text(encoding="utf-8").splitlines() == [
+        ",".join(FACT_PREVIEW_COLUMNS)
+    ]
+
+
+def test_preview_has_no_blank_rows_between_records(tmp_path: Path) -> None:
+    """Same byte-level §14 check as the rejected writer — the csv module hides this."""
+    from src.loaders import FactPreviewWriter
+
+    path = FactPreviewWriter(tmp_path).write([make_fact(order_id=n) for n in (1, 2, 3)])
+
+    raw = path.read_bytes()
+
+    assert raw.count(b"\r\r") == 0
+    assert raw.count(b"\r\n") == 4  # header + 3 records
+    assert not any(line == b"" for line in raw.split(b"\r\n")[:-1])
+
+
+def test_preview_preserves_decimal_scale(tmp_path: Path) -> None:
+    """90.00 must not become 90.0 or 90 — the trailing zeros are part of the value."""
+    from src.loaders import FactPreviewWriter
+
+    path = FactPreviewWriter(tmp_path).write([make_fact()])
+    row = read_rows(path)[0]
+
+    assert row["unit_price"] == "25.00"
+    assert row["gross_sales"] == "100.00"
+    assert row["net_sales"] == "90.00"
+    assert row["discount_rate"] == "0.10"
+
+
+def test_preview_writes_natural_keys(tmp_path: Path) -> None:
+    from src.loaders import FactPreviewWriter
+
+    path = FactPreviewWriter(tmp_path).write([make_fact()])
+    row = read_rows(path)[0]
+
+    assert row["customer_id"] == "C019"
+    assert row["product_id"] == "P009"
+
+
+def test_preview_of_the_real_172_valid_rows(tmp_path: Path) -> None:
+    """End-to-end dry-run artifact: every valid row previewed, totals intact (D-024)."""
+    from datetime import date
+
+    from src.extractors import CSVExtractor, JSONExtractor
+    from src.loaders import FactPreviewWriter
+    from src.transformers import ReferenceDataTransformer, SalesDataTransformer
+    from src.validators import SalesDataValidator, period_from_filename
+
+    raw_dir = Path(__file__).resolve().parent.parent / "data" / "raw"
+    reference = ReferenceDataTransformer()
+    customers = reference.to_customers(JSONExtractor(raw_dir / "customers.json").extract())
+    products = reference.to_products(JSONExtractor(raw_dir / "products.json").extract())
+
+    valid, _ = SalesDataValidator(
+        reference.customer_ids(customers),
+        reference.product_ids(products),
+        today=date(2026, 8, 17),
+        period=period_from_filename("sales_2026_01.csv"),
+    ).validate(CSVExtractor(raw_dir / "sales_2026_01.csv").extract())
+
+    facts = SalesDataTransformer().to_facts(valid)
+    path = FactPreviewWriter(tmp_path).write(facts)
+    rows = read_rows(path)
+
+    assert len(rows) == 172
+    assert sum(Decimal(row["net_sales"]) for row in rows) == Decimal("51107.07")
+    assert sum(Decimal(row["gross_sales"]) for row in rows) == Decimal("58328.37")
