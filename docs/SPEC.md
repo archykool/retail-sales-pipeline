@@ -98,6 +98,7 @@ Beaconfire_Sales/                 <- repo root, remote: retail-sales-pipeline.gi
 │   ├── SPEC.md
 │   ├── DECISION.md
 │   ├── bad_records_catalogue.md
+│   ├── requirements_coverage.md   # grader-facing coverage table
 │   └── assignment.pdf
 ├── sql/
 │   ├── schema.sql
@@ -109,14 +110,15 @@ Beaconfire_Sales/                 <- repo root, remote: retail-sales-pipeline.gi
 │   ├── extractors.py             # Extractor (ABC), CSVExtractor, JSONExtractor
 │   ├── validators.py             # SalesDataValidator
 │   ├── transformers.py           # ReferenceDataTransformer, SalesDataTransformer
-│   ├── loaders.py                # RejectedRecordWriter, DatabaseConnection, PostgresLoader
+│   ├── loaders.py                # RejectedRecordWriter, FactPreviewWriter, DatabaseConnection, PostgresLoader
 │   └── pipeline.py               # SalesPipeline
 ├── tests/
 │   ├── __init__.py
 │   ├── test_models.py
 │   ├── test_extractors.py
 │   ├── test_validators.py
-│   └── test_transformers.py
+│   ├── test_transformers.py
+│   └── test_loaders.py
 ├── scripts/
 │   └── generate_demo_data.py
 ├── .env.example
@@ -437,17 +439,18 @@ Ordered by PDF step, so this column can be walked against the assignment directl
 | 2 | Add Demo Input Data | **Step 2** | `data/raw/` ×3, plus catalogue and generator (**both additions**) | 5th | done |
 | 3 | Define Data Models *(marked OPTIONAL)* | **Step 3** | `src/models.py` | 4th | done |
 | 4 | Build Extractor Classes | **Step 4** | `src/extractors.py` | 6th | done |
-| 5 | Build the Validator | **Step 5** | `src/validators.py` | 7th | **next** |
-| 6 | Build the Transformer | **Step 6** | `src/transformers.py` | 8th | pending |
-| 7 | Build the Loader | **Step 7a** | `RejectedRecordWriter` | 9th | pending |
-| 8 | Add PostgreSQL Schema | **Step 8** | `sql/schema.sql` | 10th | pending |
-| 7 | Build the Loader *(second half)* | **Step 7b** | `DatabaseConnection`, `PostgresLoader` | 11th | pending |
+| 5 | Build the Validator | **Step 5** | `src/validators.py` | 7th | done |
+| 6 | Build the Transformer | **Step 6** | `src/transformers.py` | 8th | done |
+| 7 | Build the Loader | **Step 7a** | `RejectedRecordWriter` | 9th | done |
+| — | *(no step; §8.1 and D-011 require the file, nothing produces it)* | **Step 7b** | `FactPreviewWriter` → `preview_fact_sales.csv` | 10th | done |
+| 8 + 7 | Add PostgreSQL Schema, and the connection half of Build the Loader | **Step 8a** | `sql/schema.sql`, `DatabaseConnection` | 11th | **next** |
+| 7 | Build the Loader *(loading half)* | **Step 8b** | `PostgresLoader` | 12th | pending |
 | 9 | Add Docker Compose for PostgreSQL | **Step 9** | `docker-compose.yml`, `docker/initdb/` | 2nd | done |
-| 10 | Build the Pipeline Orchestrator | **Step 10** | `src/pipeline.py` | 12th | pending |
-| 11 | **absent from the PDF** | **Step 10+** | `main.py`, argparse, logging | 13th | pending |
-| 12 | Run the Full Project | **Step 12** | end-to-end run, six tables, idempotency proof | 14th | pending |
-| — | *(no step; the PDF never asks for tests)* | **Step 12+** | `tests/` sweep for validator and transformer | 15th | pending |
-| 13 | Run Analytics Queries | **Step 13** | `sql/analytics.sql` | 16th | pending |
+| 10 | Build the Pipeline Orchestrator | **Step 10** | `src/pipeline.py` | 13th | pending |
+| 11 | **absent from the PDF** | **Step 10+** | `main.py`, argparse, logging | 14th | pending |
+| 12 | Run the Full Project | **Step 12** | end-to-end run, six tables, idempotency proof | 15th | pending |
+| — | *(no step; the PDF never asks for tests)* | **Step 12+** | `tests/` sweep for validator and transformer | 16th | pending |
+| 13 | Run Analytics Queries | **Step 13** | `sql/analytics.sql` | 17th | pending |
 
 Three things this table makes visible, all worth saying on camera:
 
@@ -572,17 +575,51 @@ so `validate()` reads like a table of contents.
 
 ### Step 7a — Rejected-record writer
 **PDF anchor:** Step 7 — "Build the Loader" (first of the two classes it lists).
-Split from 7b because it needs no database, and it completes the dry-run path.
 `RejectedRecordWriter` in `src/loaders.py`. CSV output, timestamped filename,
 **header always written even with zero rejects** — an empty file is a signal, a
-missing file is ambiguous. **Must open with `newline=""`** (§14).
+missing file is ambiguous. **Must open with `newline=""`** (§14). `raw_payload`
+serialises as JSON in one column, matching the `JSONB` column in §5, so the file and
+the table carry one audit record in one structure.
+
+Known asymmetry, deferred to Step 14: this writer accumulates one file per run while
+§7.3 makes a rerun *delete* the prior run's rows from `etl_rejected_sales`. After
+several reruns there are many files and one table state, so file/table parity holds
+only for the newest file. Documented in the writer's docstring; do not claim parity
+on camera without that qualification.
+
 **Exit:** rejected CSV opens cleanly in Excel with no blank rows between records.
 **Commit:** `feat: rejected-record csv writer`
 
-### Step 8 — Schema DDL
-**PDF anchor:** Step 8 — "Add PostgreSQL Schema"
-`sql/schema.sql` per §5, idempotent (`IF NOT EXISTS`). Built before 7b because a
-loader cannot be tested against tables that do not exist.
+### Step 7b — Fact preview writer
+**PDF anchor:** none (addition). Named with a letter rather than `+` to keep it beside
+7a in `src/loaders.py`, but it is an addition: **§8.1 and D-011 both require
+`data/rejected/preview_fact_sales.csv` and no PDF step produces it.** Assigning it
+here rather than to Step 10 keeps CSV writing out of `pipeline.py`, where it would be
+business logic in the orchestrator — a §13 rejection trigger.
+
+`FactPreviewWriter` in `src/loaders.py`. Fixed filename, overwrites — a stale preview
+beside a current one is a way to read the wrong numbers, and overwriting matches what
+§7.3 does to the database.
+
+Columns mirror `fact_sales` as declared in §5, **in its declared order**, with two
+departures forced by §7.2: `customer_key`/`product_key` become
+`customer_id`/`product_id` because `FactSalesRecord` carries natural keys, and
+`sales_key`/`run_id`/`loaded_at` are absent because all three are generated at insert
+time. `row_num` and `source_file` trail at the end so provenance survives without
+disturbing the alignment. Comparing the file to the table therefore needs the
+`-- PREVIEW COMPARISON` join at Step 13, not `SELECT *`.
+
+**Exit:** header written with zero facts; no blank rows (byte-level check); leading ten
+columns match §5's order; `Decimal` scale preserved (`90.00`, not `90.0`).
+**Commit:** `feat: fact preview writer for dry-run`
+
+### Step 8a — Schema DDL and database connection
+**PDF anchor:** Step 8 — "Add PostgreSQL Schema", plus the `DatabaseConnection` half of
+PDF Step 7. Split from 8b because `schema.sql`, the connection lifecycle, and the load
+logic are three separate mechanisms, and 8b cannot be tested until the first two work.
+
+`sql/schema.sql` per §5, idempotent (`IF NOT EXISTS`). `DatabaseConnection` context
+manager (§7.4), one transaction per run.
 
 **No `CHECK (gross_sales = discount_amount + net_sales)`.** It would reject three
 valid rows (34, 76, 118 — see D-024). Its absence must carry a comment in
@@ -591,19 +628,22 @@ and three good rows start failing for a reason nobody remembers. The other `CHEC
 constraints stay: they duplicate the validator on sign and range, which is D-010's
 point.
 
-**Exit:** applying it twice in a row succeeds; six tables visible in DBeaver.
-**Commit:** `feat: star schema ddl`
+**Exit:** applying the DDL twice in a row succeeds; six tables visible in DBeaver; the
+context manager **rolls back** when an exception is raised mid-transaction.
+**Commit:** `feat: star schema ddl and database connection`
 
-### Step 7b — Database connection and Postgres loader
+### Step 8b — Postgres loader
 **PDF anchor:** Step 7 — "Build the Loader" (second of the two classes it lists).
-`DatabaseConnection` context manager (§7.4). `PostgresLoader` with `create_tables`,
-`load_staging`, `upsert_dim_customers`, `upsert_dim_products`, `load_facts`,
-`load_rejected`, `write_run_log`. Surrogate-key resolution happens here, never in
-the transformer — that would require a DB connection in `transformers.py` and break
-§3.1.
-**Exit:** loading by hand from a REPL populates all six tables; the §8.2
+Do not start until 8a's exit criteria pass.
+
+`PostgresLoader` with `create_tables`, `load_staging`, `upsert_dim_customers`,
+`upsert_dim_products`, `load_facts`, `load_rejected`, `write_run_log`. Surrogate-key
+resolution happens here, never in the transformer — that would require a DB connection
+in `transformers.py` and break §3.1.
+
+**Exit:** a hand-run load from the REPL populates all six tables; the §8.2
 reconciliation balances.
-**Commit:** `feat: database connection and postgres loader`
+**Commit:** `feat: postgres loader`
 
 ### Step 10 — Orchestrator
 **PDF anchor:** Step 10 — "Build the Pipeline Orchestrator(auto ingest)". Dry-run

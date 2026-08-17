@@ -96,7 +96,28 @@ Why pay it: surrogate keys decouple the warehouse from source-system identifiers
 
 Snowflaking rejected: normalizing `category` out of `dim_products` would add a join to every product query to save a few hundred bytes. Wrong trade at this scale.
 
-**Trade-off I accept.** Debugging is slightly less pleasant — `fact_sales` shows `product_key = 7` rather than `SKU-1042`, so eyeballing raw fact rows requires a join.
+**The argument that actually settles it is §3.1, not warehousing convention.**
+
+`FactSalesRecord` carries natural keys — `customer_id`, `product_id` — and it has to.
+A surrogate key does not exist until its dimension row has been inserted, so producing
+one means querying `dim_customers`. If `SalesDataTransformer` did that, `transformers.py`
+would need a database connection, which means importing `loaders.py`, which is the
+back-edge the one-way dependency rule forbids. There is no way to have the transformer
+emit surrogate keys and keep §3.1 intact.
+
+So surrogate resolution can only live in the loader, where the connection already is.
+That places the `{business_id: surrogate_key}` maps in `PostgresLoader` (§7.2) not as a
+matter of taste but as the only position consistent with the architecture — and it makes
+the boundary testable: `test_transformers.py` asserts the module's source contains no
+`psycopg` import and no `loaders` import, and `test_fact_carries_natural_keys_not_surrogate_keys`
+asserts the fact record has no `customer_key` attribute.
+
+That is the version worth saying out loud. "Surrogate keys are a warehousing convention"
+is a claim about fashion; "the dependency rule leaves surrogate resolution nowhere else
+to go" is a conclusion, and it connects the schema decision to the structural claim the
+whole walkthrough rests on.
+
+**Trade-off I accept.** Debugging is slightly less pleasant — `fact_sales` shows `product_key = 7` rather than `SKU-1042`, so eyeballing raw fact rows requires a join. That join is also what `preview_fact_sales.csv` needs in order to be compared to the table by eye (Step 7b), so the cost shows up twice.
 
 **Say on camera.** "Surrogate keys cost me a lookup dictionary at load time and buy independence from source-system IDs — it's also the only way to version a dimension later."
 
@@ -310,6 +331,53 @@ The ambiguity is the point worth voicing. Noticing that "between zero and one" i
 **Consequences**: The .env file is relegated to a local development convenience. In production, variables are injected directly by the container runtime, keeping the code execution path identical—which is the exact prerequisite for the dev/prod switching in §8.1. The trade-off is that unit tests targeting from_env() must explicitly monkeypatch the environment, adding a couple of extra lines compared to reading directly from a file.
 
 **Say on camera.** "Config reads from the environment, not from files—the .env file is just a local convenience, requiring zero changes in production."
+
+---
+
+## D-020 — Provenance survives validation
+
+**Status:** Accepted
+
+**Context.** `RawSalesRecord` and `RejectedRecord` both carry `row_num` and
+`source_file`; the first draft of `ValidSalesRecord` and `FactSalesRecord` carried
+neither. So a record knew where it came from right up until it passed validation, and
+then forgot.
+
+That is backwards. §5's `stg_sales` declares both columns, so they had no source to be
+populated from — and the rows that keep full provenance were the ones already quarantined
+with their raw payload attached, while the rows that go on to become revenue lost it.
+
+**Options.**
+1. **Provenance on rejected records only.** Enough to fix a bad file, which is the
+   obvious use case.
+2. **Carry `row_num` and `source_file` through every sales state.**
+3. **Reconstruct it when needed** by joining `fact_sales` back to the source file on
+   `order_id`.
+
+**Decision.** Option 2. Two extra fields on two dataclasses, positioned first to match
+the convention already set by `RawSalesRecord`.
+
+**Consequences.** Option 3 is the one that looks cheapest and fails exactly when it is
+needed. Reconstruction requires a usable `order_id`, and the rows hardest to locate are
+the ones whose `order_id` was the defect — `BAD_INT_ORDER_ID` has nothing to join on. A
+recovery mechanism that works only for records that were fine anyway is not a recovery
+mechanism.
+
+The concrete payoff is at §8.2. When the reconciliation does not balance, the question is
+never "did it balance" but "which row", and `row_num` plus `source_file` answers it
+directly: open that file, go to that line. Without them the failure is real but
+unlocalisable, which is the same weakness D-022 identifies in the NaN case.
+
+`source_file` is deliberately `path.name` and not the full path. A full path would differ
+between machines, so the same file would look like a different source on another checkout
+and §7.3's `DELETE FROM stg_sales WHERE source_file = %s` would stop matching prior runs.
+Keeping it to the bare filename means **one key serves three purposes**: the idempotency
+key, the provenance record, and the correlation key between the rejected CSV and
+`etl_rejected_sales` — which is why `run_id` does not need to appear in that CSV. `run_id`
+belongs to a run, not to a record; putting it on `RejectedRecord` would give the data
+model an orchestration concept.
+
+**Say on camera.**
 
 ---
 
