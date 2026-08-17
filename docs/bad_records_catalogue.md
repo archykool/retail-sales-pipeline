@@ -190,6 +190,14 @@ Worth saying on camera: two rules that look independent are coupled by the
 dataset, and the multi-reason `reason_detail` is what makes the coupling visible
 instead of hiding one behind the other.
 
+**This table assumes today is later than 2026-01-31.** Row 72's resolution depends on
+the clock: `2026-09-15` is only a future date while the run happens before it. Were
+the pipeline run before that date, row 72 would resolve as `DATE_OUT_OF_PERIOD` alone,
+`DATE_IN_FUTURE`'s count would drop to zero, and §2's per-code table would be wrong —
+while the 172/28 split stayed correct, since the row is rejected either way. The
+validator's tests pin `today` to `2026-08-17` for exactly this reason, so the suite
+does not start failing next year over a date rather than a defect.
+
 ---
 
 ## 6. Cleaned, not rejected (2 rows — both stay valid)

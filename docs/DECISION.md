@@ -367,6 +367,107 @@ even though it is not the count of *failed checks*.
 
 ---
 
+## D-022 — Reject non-finite decimals at the parse boundary
+
+**Status:** Accepted
+
+**Context.** `Decimal("nan")`, `Decimal("Infinity")`, and `Decimal("-Infinity")` all
+parse successfully — they are valid `Decimal` values, not parse errors. The obvious
+validator therefore accepts them, and then IEEE 754 governs what happens next: every
+comparison against NaN returns `False`, including `NaN == NaN`.
+
+**Options.**
+1. **No check.** What a straightforward implementation does, because nothing in §6
+   mentions NaN and `Decimal()` raises no error.
+2. **Reject at the parse boundary**, under the existing `BAD_DECIMAL_PRICE` /
+   `BAD_DECIMAL_DISCOUNT` codes.
+3. **Guard downstream** — in the transformer's arithmetic, or with a database `CHECK`,
+   per D-010's defence-in-depth argument.
+
+**Decision.** Option 2. `_to_decimal()` treats a parsed-but-non-finite value exactly
+as it treats an unparseable one. No new reason code: the row genuinely is "not a
+usable decimal", and `reason_detail` distinguishes the two causes in words.
+
+**Consequences.** Option 1's failure chain is worth following all the way, because
+every link is silent:
+
+1. `nan <= 0` is `False`, so `PRICE_NOT_POSITIVE` does not fire.
+2. `nan > max_quantity` is `False`, so no threshold rule fires.
+3. `nan.as_tuple().exponent` is not a negative integer, so `PRICE_PRECISION` does not fire.
+4. The row passes validation and is counted as valid. Row conservation still balances.
+5. It reaches `fact_sales`, and `SUM(net_sales)` for the whole table becomes NaN.
+6. §8.2's control total compares the staging sum to the fact sum — `NaN = NaN` is
+   `False`, so the reconciliation reports a mismatch.
+7. The mismatch is unlocalisable. Every per-row check also compares against NaN and
+   also returns `False`, so nothing identifies which row poisoned the total.
+
+That is the specific reason this belongs at the parse boundary rather than downstream:
+it is the last point at which the offending row is still identifiable. Once the value
+is inside an aggregate, the evidence is gone.
+
+Option 3 also does not work as a safety net here, and that is worth checking at Step 8:
+PostgreSQL's `numeric` type accepts `NaN` and orders it *above* all other values, so
+`CHECK (unit_price > 0)` would pass it. D-010's claim that the `CHECK` constraints
+duplicate the Python validator has a hole exactly at this case — the constraint is not
+a second line of defence against non-finite input, only against sign and range.
+
+Cost: one extra branch per decimal parse, and two reason codes that now cover two
+distinct causes each.
+
+**Say on camera.**
+
+---
+
+## D-023 — `reason_detail` stays a joined string; the code list is accepted debt
+
+**Status:** Accepted debt, not accepted design
+
+**Context.** A rejected row carries one primary `reason_code` plus `reason_detail`,
+which joins every surviving defect into a single string (D-021). A consumer that wants
+to filter on a *non-primary* code has to parse prose to do it.
+
+This surfaced as a real bug at Step 5. The separator was `"; "` and one detail message
+— "carries currency formatting; expected a bare decimal" — contained a semicolon, so
+anything splitting `reason_detail` saw a defect that did not exist. It failed silently
+in both directions: nothing raised, and the phantom code looked plausible.
+
+**Options.**
+1. **Remove the semicolon from that message.** Fixes the instance, leaves the class
+   open for the next person who writes a detail containing the separator, and fails
+   silently again when they do.
+2. **Change the separator to `" | "`** — a sequence prose will not produce.
+3. **Add `reason_codes: tuple[str, ...]` to `RejectedRecord`.** Nothing parses
+   anything; the codes are structured data.
+
+**Decision.** Option 2 now. Option 3 is the correct fix and is **deliberately
+deferred.**
+
+Option 3 is right and we are not doing it because of where it reaches: `models.py`
+(Step 3, committed), the rejected-record CSV writer (Step 7a), and the
+`etl_rejected_sales` DDL (Step 8). Three steps, two of them not yet built, to fix a
+defect whose entire current impact is readability. `reason_code` is a separate field
+and is unaffected, so `GROUP BY reason_code` — the actual analytics requirement, R23 —
+works correctly today.
+
+**Trigger for paying the debt:** any consumer that needs to filter or aggregate on a
+non-primary code. The moment a query wants "every row where `UNKNOWN_PRODUCT` fired,
+primary or not", the string parse becomes load-bearing and Option 3 stops being
+optional. Until then this is a documented shortcut, not an oversight.
+
+**Consequences.** Option 2 makes the string reliably splittable, which means the debt
+is survivable rather than actively misleading — the difference between a shortcut and a
+trap. It does not make the string *structured*, so anyone splitting it is still relying
+on a formatting convention rather than a data contract, and that convention now lives
+in one named constant (`DETAIL_SEPARATOR`) instead of being inlined at the join site.
+
+The honest cost of deferring: a future consumer will hit this, and the fix will be
+more expensive then than now, because Steps 7a and 8 will have shipped and the DDL
+will need a migration rather than an edit.
+
+**Say on camera.**
+
+---
+
 ## Open questions (Q2 and Q3 resolve before Step 5; Q4 and Q5 before Step 8)
 
 | # | Question | Leaning |

@@ -48,6 +48,10 @@ TIER_FILE_SCOPE = 5
 
 DEFAULT_MAX_QUANTITY = 1000
 
+# Joins the defects of one rejected row into `reason_detail`. Must be a sequence no
+# detail message can contain, so the string stays unambiguously splittable (D-023).
+DETAIL_SEPARATOR = " | "
+
 # Characters that mark a price as formatted-for-humans rather than machine-readable.
 # Their presence produces NON_NUMERIC_CURRENCY, which is a more precise diagnosis of
 # the same parse failure BAD_DECIMAL_PRICE would report, so it suppresses it.
@@ -511,13 +515,25 @@ class SalesDataValidator:
             source_file=record.source_file,
             raw_payload=self._payload(record),
             reason_code=ordered[0].code,
-            reason_detail="; ".join(f"{d.code}: {d.detail}" for d in ordered),
+            # " | " and not "; " — a detail message may legitimately contain a
+            # semicolon, and when one did, anything splitting this string saw a
+            # defect that was not there and said nothing about it. The separator has
+            # to be a character prose will not produce (D-023).
+            reason_detail=DETAIL_SEPARATOR.join(
+                f"{d.code}: {d.detail}" for d in ordered
+            ),
             rejected_at=datetime.now(),
         )
 
     @staticmethod
     def _accept(record: RawSalesRecord, parsed: _Parsed) -> ValidSalesRecord:
-        """Promote a clean row, carrying provenance forward (D-020)."""
+        """Promote a clean row, carrying provenance forward (D-020).
+
+        The `type: ignore` comments below record something the checker cannot see:
+        reaching here means `defects` was empty, which means every field parsed, so
+        no value is None. A third "fully parsed" type would prove it structurally and
+        cost a reader more than it saves.
+        """
         return ValidSalesRecord(
             row_num=record.row_num,
             source_file=record.source_file,

@@ -544,11 +544,19 @@ tests, not by a committed data file (see Step 2).
 ### Step 5 — Validator
 **PDF anchor:** Step 5 — "Build the Validator". The PDF lists nine checks and then
 asks for "More edge case we should validate"; §6.2 is that answer.
-`src/validators.py`. Constructor takes `set[customer_id]` and `set[product_id]`. All
-rules from §6, with the D-021 precedence tiers deciding the primary code. One
-private method per rule family — `_check_types`, `_check_ranges`,
-`_check_foreign_keys`, `_check_duplicates` — so `validate()` reads like a table of
-contents.
+`src/validators.py`. Constructor takes `set[customer_id]` and `set[product_id]`
+positionally, plus three keyword-only injections: `max_quantity` (§6.2 calls the
+outlier guard env-configurable), `today`, and `period`. The last two are injected
+rather than read internally because `DATE_IN_FUTURE` compares against the clock and
+`DATE_OUT_OF_PERIOD` against the filename — reading either in place would make the
+test suite pass today and fail next year for reasons unrelated to the code, and would
+give the validator a reason to know about filenames. `period=None` skips the period
+rule rather than guessing at one.
+
+All rules from §6, with the D-021 precedence tiers deciding the primary code and
+D-022 rejecting non-finite decimals at the parse boundary. One private method per rule
+family — `_check_types`, `_check_ranges`, `_check_foreign_keys`, `_check_duplicates` —
+so `validate()` reads like a table of contents.
 **Exit:** valid/rejected counts match `bad_records_catalogue.md` **exactly**
 (172/28), including which code fired on which row.
 **Commit:** `feat: record-level validator with typed rejection reasons`
