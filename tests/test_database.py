@@ -420,9 +420,16 @@ def test_staging_constraints_match_the_fact_table(
 
 
 def test_staging_has_no_additivity_constraint(db_params: dict, schema: str) -> None:
-    """stg_sales carries no measures, so there is nothing to be additive — but the
-    boundary is worth pinning: staging holds the inputs to the arithmetic, and the three
-    computed columns exist only on fact_sales (D-024).
+    """The cleaner form of the D-024 argument, one layer earlier.
+
+    At `fact_sales` the missing additivity constraint is a *choice* — the three columns are
+    there, they could be constrained against each other, and we decided not to. Here it is
+    a *structural fact*: `stg_sales` holds the inputs to the arithmetic, not its outputs, so
+    there is nothing to constrain. The measures do not exist at this layer.
+
+    That distinction is worth keeping straight. A reader who sees no additivity constraint
+    in either table might conclude the rule was forgotten twice. It was declined once and
+    was never applicable at all in the other place, and this test pins the second half.
     """
     apply_ddl(db_params, schema)
 
